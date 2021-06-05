@@ -50,23 +50,22 @@ public:
 
         union {
             struct {
-                INSERT_PADDING_WORDS_NOINIT(0x60);
-
-                Upload::Registers upload;
-
-                struct {
+                /* 0x000 */ INSERT_PADDING_BYTES_NOINIT(0x180);
+                /* 0x180 */ Upload::Registers upload;
+                /* 0x1B0 */ struct {
                     union {
                         BitField<0, 1, u32> linear;
                     };
                 } exec;
-
-                u32 data;
-
-                INSERT_PADDING_WORDS_NOINIT(0x11);
+                /* 0x1B4 */ u32 data;
+                /* 0x1B8 */ INSERT_PADDING_BYTES_NOINIT(0x44);
             };
             std::array<u32, NUM_REGS> reg_array;
         };
     } regs{};
+
+    static_assert(sizeof(Regs) == Regs::NUM_REGS * sizeof(u32),
+                  "KeplerMemory Regs has wrong size");
 
 private:
     Core::System& system;
@@ -74,12 +73,12 @@ private:
 };
 
 #define ASSERT_REG_POSITION(field_name, position)                                                  \
-    static_assert(offsetof(KeplerMemory::Regs, field_name) == position * 4,                        \
+    static_assert(offsetof(KeplerMemory::Regs, field_name) == position,                        \
                   "Field " #field_name " has invalid position")
 
-ASSERT_REG_POSITION(upload, 0x60);
-ASSERT_REG_POSITION(exec, 0x6C);
-ASSERT_REG_POSITION(data, 0x6D);
+ASSERT_REG_POSITION(upload, 0x180);
+ASSERT_REG_POSITION(exec, 0x1B0);
+ASSERT_REG_POSITION(data, 0x1B4);
 #undef ASSERT_REG_POSITION
 
 } // namespace Tegra::Engines

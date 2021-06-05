@@ -12,6 +12,7 @@
 #include "video_core/gpu.h"
 #include "video_core/memory_manager.h"
 #include "video_core/rasterizer_interface.h"
+#include "video_core/record.h"
 #include "video_core/textures/texture.h"
 
 namespace Tegra::Engines {
@@ -248,6 +249,13 @@ void Maxwell3D::CallMacroMethod(u32 method, const std::vector<u32>& parameters) 
 }
 
 void Maxwell3D::CallMethod(u32 method, u32 method_argument, bool is_last_call) {
+    if constexpr (Tegra::Record::RECORD_ENGINE[Tegra::Record::GetEngineIndex(
+                      EngineID::MAXWELL_B)]) {
+        if (Tegra::CURRENTLY_RECORDING) {
+            Tegra::METHODS_CALLED.emplace_back(EngineID::MAXWELL_B, method, method_argument);
+        }
+    }
+
     if (method == cb_data_state.current) {
         regs.reg_array[method] = method_argument;
         ProcessCBData(method_argument);

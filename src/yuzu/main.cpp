@@ -1034,6 +1034,10 @@ void GMainWindow::InitializeHotkeys() {
                     render_window->setAttribute(Qt::WA_Hover, true);
                 }
             });
+
+    // Hidden commands
+    connect(hotkey_registry.GetHotkey(main_window, QStringLiteral("Cap Frame Graphic Methods"), this),
+            &QShortcut::activated, this, [] { Settings::values.pending_frame_record = true; });
 }
 
 void GMainWindow::SetDefaultUIGeometry() {

@@ -120,7 +120,7 @@ public:
     };
 
     enum class ColorKeyFormat : u32 {
-        A16R56G6B5 = 0,
+        A16R5G6B5 = 0,
         A1R5G55B5 = 1,
         A8R8G8B8 = 2,
         A2R10G10B10 = 3,
@@ -154,7 +154,7 @@ public:
     };
 
     enum class MonochromePatternColorFormat : u32 {
-        A8X8R8G6B5 = 0,
+        A8X8R5G6B5 = 0,
         A1R5G5B5 = 1,
         A8R8G8B8 = 2,
         A8Y8 = 3,
@@ -170,50 +170,50 @@ public:
     union Regs {
         static constexpr std::size_t NUM_REGS = 0x258;
         struct {
-            u32 object;
-            INSERT_PADDING_WORDS_NOINIT(0x3F);
-            u32 no_operation;
-            NotifyType notify;
-            INSERT_PADDING_WORDS_NOINIT(0x2);
-            u32 wait_for_idle;
-            INSERT_PADDING_WORDS_NOINIT(0xB);
-            u32 pm_trigger;
-            INSERT_PADDING_WORDS_NOINIT(0xF);
-            u32 context_dma_notify;
-            u32 dst_context_dma;
-            u32 src_context_dma;
-            u32 semaphore_context_dma;
-            INSERT_PADDING_WORDS_NOINIT(0x1C);
-            Surface dst;
-            CpuIndexWrap pixels_from_cpu_index_wrap;
-            u32 kind2d_check_enable;
-            Surface src;
-            SectorPromotion pixels_from_memory_sector_promotion;
-            INSERT_PADDING_WORDS_NOINIT(0x1);
-            NumTpcs num_tpcs;
-            u32 render_enable_addr_upper;
-            u32 render_enable_addr_lower;
-            RenderEnableMode render_enable_mode;
-            INSERT_PADDING_WORDS_NOINIT(0x4);
-            u32 clip_x0;
-            u32 clip_y0;
-            u32 clip_width;
-            u32 clip_height;
-            BitField<0, 1, u32> clip_enable;
-            BitField<0, 3, ColorKeyFormat> color_key_format;
-            u32 color_key;
-            BitField<0, 1, u32> color_key_enable;
-            BitField<0, 8, u32> rop;
-            u32 beta1;
-            Beta4 beta4;
-            Operation operation;
-            union {
+            /* 0x000 */ u32 object;
+            /* 0x004 */ INSERT_PADDING_BYTES_NOINIT(0xFC);
+            /* 0x100 */ u32 no_operation;
+            /* 0x104 */ NotifyType notify;
+            /* 0x108 */ INSERT_PADDING_BYTES_NOINIT(0x8);
+            /* 0x110 */ u32 wait_for_idle;
+            /* 0x114 */ INSERT_PADDING_BYTES_NOINIT(0x2C);
+            /* 0x140 */ u32 pm_trigger;
+            /* 0x144 */ INSERT_PADDING_BYTES_NOINIT(0x3C);
+            /* 0x180 */ u32 context_dma_notify;
+            /* 0x184 */ u32 dst_context_dma;
+            /* 0x188 */ u32 src_context_dma;
+            /* 0x18C */ u32 semaphore_context_dma;
+            /* 0x190 */ INSERT_PADDING_BYTES_NOINIT(0x70);
+            /* 0x200 */ Surface dst;
+            /* 0x228 */ CpuIndexWrap pixels_from_cpu_index_wrap;
+            /* 0x22C */ u32 kind2d_check_enable;
+            /* 0x230 */ Surface src;
+            /* 0x258 */ SectorPromotion pixels_from_memory_sector_promotion;
+            /* 0x25C */ INSERT_PADDING_BYTES_NOINIT(0x4);
+            /* 0x260 */ NumTpcs num_tpcs;
+            /* 0x264 */ u32 render_enable_addr_upper;
+            /* 0x268 */ u32 render_enable_addr_lower;
+            /* 0x26C */ RenderEnableMode render_enable_mode;
+            /* 0x270 */ INSERT_PADDING_BYTES_NOINIT(0x10);
+            /* 0x280 */ u32 clip_x0;
+            /* 0x284 */ u32 clip_y0;
+            /* 0x288 */ u32 clip_width;
+            /* 0x28C */ u32 clip_height;
+            /* 0x290 */ BitField<0, 1, u32> clip_enable;
+            /* 0x294 */ BitField<0, 3, ColorKeyFormat> color_key_format;
+            /* 0x298 */ u32 color_key;
+            /* 0x29C */ BitField<0, 1, u32> color_key_enable;
+            /* 0x2A0 */ BitField<0, 8, u32> rop;
+            /* 0x2A4 */ u32 beta1;
+            /* 0x2A8 */ Beta4 beta4;
+            /* 0x2AC */ Operation operation;
+            /* 0x2B0 */ union {
                 BitField<0, 6, u32> x;
                 BitField<8, 6, u32> y;
             } pattern_offset;
-            BitField<0, 2, PatternSelect> pattern_select;
-            INSERT_PADDING_WORDS_NOINIT(0xC);
-            struct {
+            /* 0x2B4 */ BitField<0, 2, PatternSelect> pattern_select;
+            /* 0x2B8 */ INSERT_PADDING_BYTES_NOINIT(0x30);
+            /* 0x2E8 */ struct {
                 BitField<0, 3, MonochromePatternColorFormat> color_format;
                 BitField<0, 1, MonochromePatternFormat> format;
                 u32 color0;
@@ -221,24 +221,24 @@ public:
                 u32 pattern0;
                 u32 pattern1;
             } monochrome_pattern;
-            struct {
+            /* 0x300 */ struct {
                 std::array<u32, 0x40> X8R8G8B8;
                 std::array<u32, 0x20> R5G6B5;
                 std::array<u32, 0x20> X1R5G5B5;
                 std::array<u32, 0x10> Y8;
             } color_pattern;
-            INSERT_PADDING_WORDS_NOINIT(0x10);
-            struct {
+            /* 0x540 */ INSERT_PADDING_BYTES_NOINIT(0x40);
+            /* 0x580 */ struct {
                 u32 prim_mode;
                 u32 prim_color_format;
                 u32 prim_color;
                 u32 line_tie_break_bits;
-                INSERT_PADDING_WORDS_NOINIT(0x14);
+                INSERT_PADDING_BYTES_NOINIT(0x50);
                 u32 prim_point_xy;
-                INSERT_PADDING_WORDS_NOINIT(0x7);
+                INSERT_PADDING_BYTES_NOINIT(0x1C);
                 std::array<Point, 0x40> prim_point;
             } render_solid;
-            struct {
+            /* 0x800 */ struct {
                 u32 data_type;
                 u32 color_format;
                 u32 index_format;
@@ -247,7 +247,7 @@ public:
                 u32 color0;
                 u32 color1;
                 u32 mono_opacity;
-                INSERT_PADDING_WORDS_NOINIT(0x6);
+                INSERT_PADDING_BYTES_NOINIT(0x18);
                 u32 src_width;
                 u32 src_height;
                 u32 dx_du_frac;
@@ -260,10 +260,10 @@ public:
                 u32 dst_y0_int;
                 u32 data;
             } pixels_from_cpu;
-            INSERT_PADDING_WORDS_NOINIT(0x3);
-            u32 big_endian_control;
-            INSERT_PADDING_WORDS_NOINIT(0x3);
-            struct {
+            INSERT_PADDING_BYTES_NOINIT(0xC);
+            /* 0x870 */ u32 big_endian_control;
+            INSERT_PADDING_BYTES_NOINIT(0xC);
+            /* 0x880 */ struct {
                 BitField<0, 3, u32> block_shape;
                 BitField<0, 5, u32> corral_size;
                 BitField<0, 1, u32> safe_overlap;
@@ -271,7 +271,7 @@ public:
                     BitField<0, 1, Origin> origin;
                     BitField<4, 1, Filter> filter;
                 } sample_mode;
-                INSERT_PADDING_WORDS_NOINIT(0x8);
+                INSERT_PADDING_BYTES_NOINIT(0x20);
                 s32 dst_x0;
                 s32 dst_y0;
                 s32 dst_width;
@@ -297,6 +297,8 @@ public:
         s32 src_x1;
         s32 src_y1;
     };
+
+    static_assert(sizeof(Regs) == Regs::NUM_REGS * sizeof(u32), "Fermi2D Regs has wrong size");
 
 private:
     VideoCore::RasterizerInterface* rasterizer;

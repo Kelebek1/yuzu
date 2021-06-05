@@ -55,34 +55,25 @@ public:
 
         union {
             struct {
-                INSERT_PADDING_WORDS_NOINIT(0x60);
-
-                Upload::Registers upload;
-
-                struct {
+                /* 0x0000 */ INSERT_PADDING_BYTES_NOINIT(0x180);
+                /* 0x0180 */ Upload::Registers upload;
+                /* 0x01B0 */ struct {
                     union {
                         BitField<0, 1, u32> linear;
                     };
                 } exec_upload;
-
-                u32 data_upload;
-
-                INSERT_PADDING_WORDS_NOINIT(0x3F);
-
-                struct {
+                /* 0x01B4 */ u32 data_upload;
+                /* 0x01B8 */ INSERT_PADDING_BYTES_NOINIT(0xFC);
+                /* 0x02B4 */ struct {
                     u32 address;
                     GPUVAddr Address() const {
                         return static_cast<GPUVAddr>((static_cast<GPUVAddr>(address) << 8));
                     }
                 } launch_desc_loc;
-
-                INSERT_PADDING_WORDS_NOINIT(0x1);
-
-                u32 launch;
-
-                INSERT_PADDING_WORDS_NOINIT(0x4A7);
-
-                struct {
+                /* 0x02B8 */ INSERT_PADDING_BYTES_NOINIT(0x4);
+                /* 0x02BC */ u32 launch;
+                /* 0x02C0 */ INSERT_PADDING_BYTES_NOINIT(0x129C);
+                /* 0x155C */ struct {
                     u32 address_high;
                     u32 address_low;
                     u32 limit;
@@ -91,10 +82,8 @@ public:
                                                      address_low);
                     }
                 } tsc;
-
-                INSERT_PADDING_WORDS_NOINIT(0x3);
-
-                struct {
+                /* 0x1568 */ INSERT_PADDING_BYTES_NOINIT(0xC);
+                /* 0x1574 */ struct {
                     u32 address_high;
                     u32 address_low;
                     u32 limit;
@@ -103,10 +92,8 @@ public:
                                                      address_low);
                     }
                 } tic;
-
-                INSERT_PADDING_WORDS_NOINIT(0x22);
-
-                struct {
+                /* 0x1580 */ INSERT_PADDING_BYTES_NOINIT(0x88);
+                /* 0x1608 */ struct {
                     u32 address_high;
                     u32 address_low;
                     GPUVAddr Address() const {
@@ -114,12 +101,9 @@ public:
                                                      address_low);
                     }
                 } code_loc;
-
-                INSERT_PADDING_WORDS_NOINIT(0x3FE);
-
-                u32 tex_cb_index;
-
-                INSERT_PADDING_WORDS_NOINIT(0x374);
+                /* 0x1610 */ INSERT_PADDING_BYTES_NOINIT(0xFF8);
+                /* 0x2608 */ u32 tex_cb_index;
+                /* 0x260C */ INSERT_PADDING_BYTES_NOINIT(0xDD4);
             };
             std::array<u32, NUM_REGS> reg_array;
         };
@@ -128,37 +112,27 @@ public:
     struct LaunchParams {
         static constexpr std::size_t NUM_LAUNCH_PARAMETERS = 0x40;
 
-        INSERT_PADDING_WORDS(0x8);
-
-        u32 program_start;
-
-        INSERT_PADDING_WORDS(0x2);
-
-        BitField<30, 1, u32> linked_tsc;
-
-        BitField<0, 31, u32> grid_dim_x;
-        union {
+        /* 0x00 */ INSERT_PADDING_BYTES(0x20);
+        /* 0x20 */ u32 program_start;
+        /* 0x24 */ INSERT_PADDING_BYTES(0x8);
+        /* 0x2C */ BitField<30, 1, u32> linked_tsc;
+        /* 0x30 */ BitField<0, 31, u32> grid_dim_x;
+        /* 0x34 */ union {
             BitField<0, 16, u32> grid_dim_y;
             BitField<16, 16, u32> grid_dim_z;
         };
-
-        INSERT_PADDING_WORDS(0x3);
-
-        BitField<0, 18, u32> shared_alloc;
-
-        BitField<16, 16, u32> block_dim_x;
-        union {
+        /* 0x38 */ INSERT_PADDING_BYTES(0xC);
+        /* 0x44 */ BitField<0, 18, u32> shared_alloc;
+        /* 0x48 */ BitField<16, 16, u32> block_dim_x;
+        /* 0x4C */ union {
             BitField<0, 16, u32> block_dim_y;
             BitField<16, 16, u32> block_dim_z;
         };
-
-        union {
+        /* 0x50 */ union {
             BitField<0, 8, u32> const_buffer_enable_mask;
             BitField<29, 2, u32> cache_layout;
         };
-
-        INSERT_PADDING_WORDS(0x8);
-
+        /* 0x54 */ INSERT_PADDING_BYTES(0x20);
         struct ConstBufferConfig {
             u32 address_low;
             union {
@@ -170,24 +144,20 @@ public:
                                              address_low);
             }
         };
-        std::array<ConstBufferConfig, NumConstBuffers> const_buffer_config;
-
-        union {
+        /* 0x74 */ std::array<ConstBufferConfig, NumConstBuffers> const_buffer_config;
+        /* 0xB4 */ union {
             BitField<0, 20, u32> local_pos_alloc;
             BitField<27, 5, u32> barrier_alloc;
         };
-
-        union {
+        /* 0xB8 */ union {
             BitField<0, 20, u32> local_neg_alloc;
             BitField<24, 5, u32> gpr_alloc;
         };
-
-        union {
+        /* 0xBC */ union {
             BitField<0, 20, u32> local_crs_alloc;
             BitField<24, 5, u32> sass_version;
         };
-
-        INSERT_PADDING_WORDS(0x10);
+        /* 0xC0 */ INSERT_PADDING_BYTES(0x40);
     } launch_description{};
 
     struct {
@@ -242,27 +212,27 @@ private:
 };
 
 #define ASSERT_REG_POSITION(field_name, position)                                                  \
-    static_assert(offsetof(KeplerCompute::Regs, field_name) == position * 4,                       \
+    static_assert(offsetof(KeplerCompute::Regs, field_name) == position,                           \
                   "Field " #field_name " has invalid position")
 
 #define ASSERT_LAUNCH_PARAM_POSITION(field_name, position)                                         \
-    static_assert(offsetof(KeplerCompute::LaunchParams, field_name) == position * 4,               \
+    static_assert(offsetof(KeplerCompute::LaunchParams, field_name) == position,                   \
                   "Field " #field_name " has invalid position")
 
-ASSERT_REG_POSITION(upload, 0x60);
-ASSERT_REG_POSITION(exec_upload, 0x6C);
-ASSERT_REG_POSITION(data_upload, 0x6D);
-ASSERT_REG_POSITION(launch, 0xAF);
-ASSERT_REG_POSITION(tsc, 0x557);
-ASSERT_REG_POSITION(tic, 0x55D);
-ASSERT_REG_POSITION(code_loc, 0x582);
-ASSERT_REG_POSITION(tex_cb_index, 0x982);
-ASSERT_LAUNCH_PARAM_POSITION(program_start, 0x8);
-ASSERT_LAUNCH_PARAM_POSITION(grid_dim_x, 0xC);
-ASSERT_LAUNCH_PARAM_POSITION(shared_alloc, 0x11);
-ASSERT_LAUNCH_PARAM_POSITION(block_dim_x, 0x12);
-ASSERT_LAUNCH_PARAM_POSITION(const_buffer_enable_mask, 0x14);
-ASSERT_LAUNCH_PARAM_POSITION(const_buffer_config, 0x1D);
+ASSERT_REG_POSITION(upload, 0x180);
+ASSERT_REG_POSITION(exec_upload, 0x1B0);
+ASSERT_REG_POSITION(data_upload, 0x1B4);
+ASSERT_REG_POSITION(launch, 0x2BC);
+ASSERT_REG_POSITION(tsc, 0x155C);
+ASSERT_REG_POSITION(tic, 0x1574);
+ASSERT_REG_POSITION(code_loc, 0x1608);
+ASSERT_REG_POSITION(tex_cb_index, 0x2608);
+ASSERT_LAUNCH_PARAM_POSITION(program_start, 0x20);
+ASSERT_LAUNCH_PARAM_POSITION(grid_dim_x, 0x30);
+ASSERT_LAUNCH_PARAM_POSITION(shared_alloc, 0x44);
+ASSERT_LAUNCH_PARAM_POSITION(block_dim_x, 0x48);
+ASSERT_LAUNCH_PARAM_POSITION(const_buffer_enable_mask, 0x50);
+ASSERT_LAUNCH_PARAM_POSITION(const_buffer_config, 0x74);
 
 #undef ASSERT_REG_POSITION
 

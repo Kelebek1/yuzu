@@ -69,6 +69,8 @@ add_library(video_core STATIC
     rasterizer_accelerated.cpp
     rasterizer_accelerated.h
     rasterizer_interface.h
+    record.cpp
+    record.h
     renderer_base.cpp
     renderer_base.h
     renderer_opengl/gl_arb_decompiler.cpp

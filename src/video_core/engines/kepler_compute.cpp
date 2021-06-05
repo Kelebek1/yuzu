@@ -42,9 +42,10 @@ void KeplerCompute::CallMethod(u32 method, u32 method_argument, bool is_last_cal
         }
         break;
     }
-    case KEPLER_COMPUTE_REG_INDEX(launch):
+    case KEPLER_COMPUTE_REG_INDEX(launch): {
         ProcessLaunch();
         break;
+    }
     default:
         break;
     }
