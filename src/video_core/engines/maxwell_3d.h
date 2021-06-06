@@ -138,6 +138,19 @@ public:
         };
 
         struct VertexAttribute {
+            enum class Size : u32;
+            enum class Type : u32;
+
+            union {
+                BitField<0, 5, u32> buffer;
+                BitField<6, 1, u32> constant;
+                BitField<7, 14, u32> offset;
+                BitField<21, 6, Size> size;
+                BitField<27, 3, Type> type;
+                BitField<31, 1, u32> bgra;
+                u32 hex;
+            };
+
             enum class Size : u32 {
                 Invalid = 0x0,
                 Size_32_32_32_32 = 0x01,
@@ -164,16 +177,6 @@ public:
                 UnsignedScaled = 5,
                 SignedScaled = 6,
                 Float = 7,
-            };
-
-            union {
-                BitField<0, 5, u32> buffer;
-                BitField<6, 1, u32> constant;
-                BitField<7, 14, u32> offset;
-                BitField<21, 6, Size> size;
-                BitField<27, 3, Type> type;
-                BitField<31, 1, u32> bgra;
-                u32 hex;
             };
 
             u32 ComponentCount() const {
@@ -320,6 +323,7 @@ public:
                 return hex < other.hex;
             }
         };
+        static_assert(sizeof(VertexAttribute) == 4);
 
         struct MsaaSampleLocation {
             union {
@@ -473,6 +477,18 @@ public:
         };
 
         struct Blend {
+            enum class Equation : u32;
+            enum class Factor : u32;
+
+            u32 separate_alpha;
+            Equation equation_rgb;
+            Factor factor_source_rgb;
+            Factor factor_dest_rgb;
+            Equation equation_a;
+            Factor factor_source_a;
+            Factor factor_dest_a;
+            INSERT_PADDING_WORDS_NOINIT(0x1);
+
             enum class Equation : u32 {
                 Add = 1,
                 Subtract = 2,
@@ -530,16 +546,8 @@ public:
                 Source1AlphaGL = 0xC902,
                 OneMinusSource1AlphaGL = 0xC903,
             };
-
-            u32 separate_alpha;
-            Equation equation_rgb;
-            Factor factor_source_rgb;
-            Factor factor_dest_rgb;
-            Equation equation_a;
-            Factor factor_source_a;
-            Factor factor_dest_a;
-            INSERT_PADDING_WORDS_NOINIT(0x1);
         };
+        static_assert(sizeof(Blend) == 32);
 
         enum class TessellationPrimitive : u32 {
             Isolines = 0,
@@ -617,6 +625,7 @@ public:
                                              address_low);
             }
         };
+        static_assert(sizeof(RenderTargetConfig) == 64);
 
         struct ColorMask {
             union {
@@ -669,6 +678,7 @@ public:
                 return translate_y + std::fabs(scale_y) - GetY();
             }
         };
+        static_assert(sizeof(ViewportTransform) == 32);
 
         struct ScissorTest {
             u32 enable;
@@ -682,6 +692,7 @@ public:
             };
             u32 fill;
         };
+        static_assert(sizeof(ScissorTest) == 16);
 
         struct ViewPort {
             union {
@@ -695,6 +706,7 @@ public:
             float depth_range_near;
             float depth_range_far;
         };
+        static_assert(sizeof(ViewPort) == 16);
 
         struct TransformFeedbackBinding {
             u32 buffer_enable;

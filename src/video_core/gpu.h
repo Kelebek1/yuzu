@@ -342,6 +342,17 @@ public:
     /// Notify rasterizer that any caches of the specified region should be flushed and invalidated
     void FlushAndInvalidateRegion(VAddr addr, u64 size);
 
+    struct RecordEntry {
+        EngineID engine;
+        u32 method;
+        u32 arg;
+        std::chrono::time_point<std::chrono::high_resolution_clock> timestamp;
+    };
+    std::atomic<bool> CURRENTLY_RECORDING = false;
+    std::chrono::time_point<std::chrono::high_resolution_clock> RECORD_TIME_ORIGIN;
+    std::vector<RecordEntry> METHODS_CALLED;
+    std::mutex record_mutex;
+
 protected:
     void TriggerCpuInterrupt(u32 syncpoint_id, u32 value) const;
 

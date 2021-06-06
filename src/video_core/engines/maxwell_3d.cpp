@@ -251,8 +251,11 @@ void Maxwell3D::CallMacroMethod(u32 method, const std::vector<u32>& parameters) 
 void Maxwell3D::CallMethod(u32 method, u32 method_argument, bool is_last_call) {
     if constexpr (Tegra::Record::RECORD_ENGINE[Tegra::Record::GetEngineIndex(
                       EngineID::MAXWELL_B)]) {
-        if (Tegra::CURRENTLY_RECORDING) {
-            Tegra::METHODS_CALLED.emplace_back(EngineID::MAXWELL_B, method, method_argument);
+        auto& gpu = system.GetInstance().GPU();
+        std::scoped_lock lock{gpu.record_mutex};
+        if (gpu.CURRENTLY_RECORDING) {
+            gpu.METHODS_CALLED.emplace_back(EngineID::MAXWELL_B, method, method_argument,
+                                            std::chrono::high_resolution_clock::now());
         }
     }
 

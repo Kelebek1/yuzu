@@ -674,11 +674,13 @@ void RasterizerOpenGL::TickFrame() {
     }
 
     if constexpr (Tegra::Record::DO_RECORD) {
-        if (Tegra::CURRENTLY_RECORDING) {
+        if (gpu.CURRENTLY_RECORDING) {
             Tegra::Record::Print(gpu, gpu.Renderer().GetCurrentFrame());
-        } else if (Settings::values.pending_frame_record) {
-            Tegra::CURRENTLY_RECORDING = true;
+        }
+        if (Settings::values.pending_frame_record) {
+            gpu.CURRENTLY_RECORDING = true;
             Settings::values.pending_frame_record = false;
+            gpu.RECORD_TIME_ORIGIN = std::chrono::high_resolution_clock::now();
         }
     }
 }
