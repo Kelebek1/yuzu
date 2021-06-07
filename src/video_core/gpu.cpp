@@ -24,6 +24,7 @@
 #include "video_core/renderer_base.h"
 #include "video_core/shader_notify.h"
 #include "video_core/video_core.h"
+#include "video_core/record.h"
 
 namespace Tegra {
 
@@ -508,6 +509,19 @@ void GPU::ClearCdmaInstance() {
 }
 
 void GPU::SwapBuffers(const Tegra::FramebufferConfig* framebuffer) {
+    if constexpr (Tegra::Record::DO_RECORD) {
+        std::scoped_lock lock{record_mutex};
+        if (CURRENTLY_RECORDING) {
+            Tegra::Record::Print(this, Renderer().GetCurrentFrame());
+            METHODS_CALLED.clear();
+            CURRENTLY_RECORDING = false;
+            RECORD_DRAW = 0;
+        } else if (Settings::values.pending_frame_record) {
+            CURRENTLY_RECORDING = true;
+            Settings::values.pending_frame_record = false;
+            RECORD_TIME_ORIGIN = std::chrono::high_resolution_clock::now();
+        }
+    }
     gpu_thread.SwapBuffers(framebuffer);
 }
 

@@ -347,8 +347,10 @@ public:
         u32 method;
         u32 arg;
         std::chrono::time_point<std::chrono::high_resolution_clock> timestamp;
+        u32 draw;
     };
     std::atomic<bool> CURRENTLY_RECORDING = false;
+    std::atomic<u32> RECORD_DRAW = 0;
     std::chrono::time_point<std::chrono::high_resolution_clock> RECORD_TIME_ORIGIN;
     std::vector<RecordEntry> METHODS_CALLED;
     std::mutex record_mutex;

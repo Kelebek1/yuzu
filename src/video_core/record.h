@@ -61,19 +61,6 @@ public:
         return "Unknown";
     }
 
-    enum class Types {
-        BOOL = 0,
-        U8,
-        U16,
-        U32,
-        S8,
-        S16,
-        S32,
-        F32,
-        BITFIELD,
-        ARRAY,
-    };
-
     struct Method {
         u32 offset = 0;
         u32 elem_count = 0;
@@ -91,14 +78,24 @@ public:
               struct_size{struct_size_}, name{name_} {};
     };
 
-    static void Print(Tegra::GPU& gpu, size_t frame);
+    static void Print(Tegra::GPU* gpu, size_t frame);
 
-    [[nodiscard]] static std::vector<std::string> GetMethodNames(GPU::RecordEntry& entry);
-    [[nodiscard]] static std::string GetArgumentInfo(GPU::RecordEntry& entry);
-    [[nodiscard]] static std::string GetFermiArg(u32 method, u32 arg);
-    [[nodiscard]] static std::string GetMaxwellArg(u32 method, u32 arg);
-    [[nodiscard]] static std::string GetKeplerComputeArg(u32 method, u32 arg);
-    [[nodiscard]] static std::string GetKeplerMemoryArg(u32 method, u32 arg);
-    [[nodiscard]] static std::string GetMaxwellDMAArg(u32 method, u32 arg);
+    [[nodiscard]] static std::vector<std::string> GetMethodNames(
+        GPU::RecordEntry& entry, std::array<Method, 400>::const_iterator start_it,
+        size_t struct_idx, size_t element_idx);
+    [[nodiscard]] static std::string GetArgumentInfo(
+        GPU::RecordEntry& entry, std::array<Method, 400>::const_iterator foundMethod, size_t i);
+    [[nodiscard]] static std::string GetFermiArg(GPU::RecordEntry& entry,
+                                                 std::array<Method, 400>::const_iterator method,
+                                                 size_t i);
+    [[nodiscard]] static std::string GetMaxwellArg(GPU::RecordEntry& entry,
+                                                   std::array<Method, 400>::const_iterator method,
+                                                   size_t i);
+    [[nodiscard]] static std::string GetKeplerComputeArg(
+        GPU::RecordEntry& entry, std::array<Method, 400>::const_iterator method, size_t i);
+    [[nodiscard]] static std::string GetKeplerMemoryArg(
+        GPU::RecordEntry& entry, std::array<Method, 400>::const_iterator method, size_t i);
+    [[nodiscard]] static std::string GetMaxwellDMAArg(
+        GPU::RecordEntry& entry, std::array<Method, 400>::const_iterator method, size_t i);
 };
 } // namespace Tegra

@@ -25,7 +25,6 @@
 #include "video_core/engines/maxwell_3d.h"
 #include "video_core/engines/shader_type.h"
 #include "video_core/memory_manager.h"
-#include "video_core/record.h"
 #include "video_core/renderer_opengl/gl_device.h"
 #include "video_core/renderer_opengl/gl_query_cache.h"
 #include "video_core/renderer_opengl/gl_rasterizer.h"
@@ -671,17 +670,6 @@ void RasterizerOpenGL::TickFrame() {
     {
         std::scoped_lock lock{buffer_cache.mutex};
         buffer_cache.TickFrame();
-    }
-
-    if constexpr (Tegra::Record::DO_RECORD) {
-        if (gpu.CURRENTLY_RECORDING) {
-            Tegra::Record::Print(gpu, gpu.Renderer().GetCurrentFrame());
-        }
-        if (Settings::values.pending_frame_record) {
-            gpu.CURRENTLY_RECORDING = true;
-            Settings::values.pending_frame_record = false;
-            gpu.RECORD_TIME_ORIGIN = std::chrono::high_resolution_clock::now();
-        }
     }
 }
 

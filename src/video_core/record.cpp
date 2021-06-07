@@ -1,75 +1,258 @@
+#include <optional>
 #include "record.h"
 
 namespace Tegra {
-void Record::Print(Tegra::GPU& gpu, size_t frame) {
-    std::scoped_lock lock{gpu.record_mutex};
+#pragma optimize("", off)
+
+using Maxwell = Tegra::Engines::Maxwell3D;
+using REG_LIST = std::array<Record::Method, 400>;
+#define REG(field_name) (offsetof(Maxwell::Regs, field_name) / sizeof(u32))
+
+std::optional<std::tuple<REG_LIST::const_iterator, size_t, size_t>> FindMethod(
+    GPU::RecordEntry& entry);
+
+void Record::Print(Tegra::GPU* gpu, size_t frame) {
     LOG_INFO(Render_OpenGL, "Methods called for frame {}:", frame);
     std::string out;
     out.reserve(0x1000);
-    for (auto& entry : gpu.METHODS_CALLED) {
-        const auto methods = GetMethodNames(entry);
+    u32 lastDraw = -1;
+    for (auto& entry : gpu->METHODS_CALLED) {
+        if (entry.draw != lastDraw) {
+            out += fmt::format("\nDraw {}\n", entry.draw);
+            lastDraw = entry.draw;
+        }
+        const auto method = FindMethod(entry);
+        if (!method) {
+            continue;
+        }
+        const auto& [foundMethod, struct_idx, element_idx] = *method;
+        const auto methodNames = GetMethodNames(entry, foundMethod, struct_idx, element_idx);
         const auto time = std::chrono::duration_cast<std::chrono::microseconds>(
-            entry.timestamp - gpu.RECORD_TIME_ORIGIN);
-        out += fmt::format("{:4} {} (0x{:04X})", time.count(), GetEngineName(entry.engine), entry.method);
+            entry.timestamp - gpu->RECORD_TIME_ORIGIN);
+        size_t line_width = out.size();
+        out += fmt::format("    {:4} {} (0x{:04X})", time.count(), GetEngineName(entry.engine),
+                           entry.method);
+        line_width = out.size() - line_width;
         size_t i = 0;
-        for (const auto& method : methods) {
-            const auto arg = GetArgumentInfo(entry);
-            if (i == 0) {
-                out += fmt::format(" {} = {}\n", method, arg);
-            } else {
-                out += fmt::format("\t\t      {} = {}\n", method, arg);
+        for (const auto& name : methodNames) {
+            const auto arg = GetArgumentInfo(entry, foundMethod, i);
+            if (i > 0) {
+                out += std::string(line_width, ' ');
             }
+            out += fmt::format("  {} = {}\n", name, arg);
             ++i;
         }
     }
     LOG_INFO(Render_OpenGL, "\n{}", out);
-    gpu.METHODS_CALLED.clear();
-    gpu.CURRENTLY_RECORDING = false;
 }
+#pragma optimize("", on)
 
-using Maxwell = Tegra::Engines::Maxwell3D;
-using REG_LIST = std::array<Record::Method, 400>;
-
-#define REG(field_name) (offsetof(Maxwell::Regs, field_name) / sizeof(u32))
-
-[[nodiscard]] std::string Record::GetArgumentInfo(GPU::RecordEntry& entry) {
+[[nodiscard]] std::string Record::GetArgumentInfo(GPU::RecordEntry& entry,
+                                                  REG_LIST::const_iterator foundMethod, size_t i) {
     switch (entry.engine) {
     case EngineID::FERMI_TWOD_A:
-        return GetFermiArg(entry.method, entry.arg);
+        return GetFermiArg(entry, foundMethod, i);
     case EngineID::MAXWELL_B:
-        return GetMaxwellArg(entry.method, entry.arg);
+        return GetMaxwellArg(entry, foundMethod, i);
     case EngineID::KEPLER_COMPUTE_B:
-        return GetKeplerComputeArg(entry.method, entry.arg);
+        return GetKeplerComputeArg(entry, foundMethod, i);
     case EngineID::KEPLER_INLINE_TO_MEMORY_B:
-        return GetKeplerMemoryArg(entry.method, entry.arg);
+        return GetKeplerMemoryArg(entry, foundMethod, i);
     case EngineID::MAXWELL_DMA_COPY_A:
-        return GetMaxwellDMAArg(entry.method, entry.arg);
+        return GetMaxwellDMAArg(entry, foundMethod, i);
     }
     UNREACHABLE();
     return "";
 }
 
-std::string Record::GetFermiArg(u32 method, u32 arg) {
+std::string Record::GetFermiArg(GPU::RecordEntry& entry, REG_LIST::const_iterator method,
+                                size_t i) {
     return "";
 }
 
-std::string Record::GetMaxwellArg(u32 method, u32 arg) {
-    switch (method) {
+std::string Record::GetMaxwellArg(GPU::RecordEntry& entry, REG_LIST::const_iterator method,
+                                  size_t i) {
+    using Regs = Maxwell::Regs;
+
+    switch (method->offset) {
     case REG(wait_for_idle):
-        return fmt::format("{}", static_cast<bool>(arg));
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+    case REG(shadow_ram_control): {
+        const auto arg = *(Regs::ShadowRamControl*)(&entry.arg);
+        switch (arg) {
+        case Regs::ShadowRamControl::Track:
+            return "Track";
+        case Regs::ShadowRamControl::TrackWithFilter:
+            return "TrackWithFilter";
+        case Regs::ShadowRamControl::Passthrough:
+            return "Passthrough";
+        case Regs::ShadowRamControl::Replay:
+            return "Replay";
+        }
+        break;
     }
-    return fmt::format("{:X}", arg);
+
+    case REG(upload.dest.block_width): {
+        const auto arg = *(Tegra::Engines::Upload::Registers*)(&entry.arg);
+        switch (i) {
+        case 0:
+            return fmt::format("{}", arg.dest.block_width);
+        case 1:
+            return fmt::format("{}", arg.dest.block_height);
+        case 2:
+            return fmt::format("{}", arg.dest.block_depth);
+        }
+        break;
+    }
+    case REG(upload.dest.width):
+    case REG(upload.dest.height):
+    case REG(upload.dest.depth):
+    case REG(upload.dest.z):
+    case REG(upload.dest.x):
+    case REG(upload.dest.y):
+        return fmt::format("{}", entry.arg);
+
+    case REG(exec_upload.linear):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+
+    case REG(sync_info): {
+        switch (i) {
+        case 0:
+            return fmt::format("0x{:X}", entry.arg & 0xFFFF);
+        case 1:
+            return fmt::format("{}", static_cast<bool>((entry.arg >> 16) & 1));
+        case 2:
+            return fmt::format("{}", static_cast<bool>((entry.arg >> 20) & 1));
+        }
+        break;
+    }
+
+    case REG(tess_mode): {
+        switch (i) {
+        case 0: {
+            const auto arg = *(Regs::TessellationPrimitive*)(&entry.arg);
+            switch (arg) {
+            case Regs::TessellationPrimitive::Isolines:
+                return fmt::format("Isolines");
+            case Regs::TessellationPrimitive::Triangles:
+                return fmt::format("Triangles");
+            case Regs::TessellationPrimitive::Quads:
+                return fmt::format("Quads");
+            }
+        } break;
+        case 1: {
+            const auto arg = *(Regs::TessellationSpacing*)(&entry.arg);
+            switch (arg) {
+            case Regs::TessellationSpacing::Equal:
+                return fmt::format("Equal");
+            case Regs::TessellationSpacing::FractionalOdd:
+                return fmt::format("FractionalOdd");
+            case Regs::TessellationSpacing::FractionalEven:
+                return fmt::format("FractionalEven");
+            }
+        } break;
+        case 2:
+            return fmt::format("{}", static_cast<bool>((entry.arg >> 8) & 1));
+        case 3:
+            return fmt::format("{}", static_cast<bool>((entry.arg >> 9) & 1));
+        }
+        break;
+    }
+    case REG(tess_level_outer):
+        return fmt::format("{}", static_cast<f32>(entry.arg));
+    case REG(tess_level_inner):
+        return fmt::format("{}", static_cast<f32>(entry.arg));
+
+    case REG(tfb_bindings[0].buffer_enable):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+
+    case REG(tfb_enabled):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+
+    case REG(vertex_attrib_format): {
+        const auto arg = *(Regs::VertexAttribute*)(&entry.arg);
+        switch (i) {
+        case 0:
+            return fmt::format("{}", arg.buffer);
+        case 1:
+            return fmt::format("{}", arg.constant);
+        case 2:
+            return fmt::format("{}", arg.offset);
+        case 3:
+            switch (arg.size) {
+            case Regs::VertexAttribute::Size::Invalid:
+                return "Invalid";
+            case Regs::VertexAttribute::Size::Size_32_32_32_32:
+                return "Size_32_32_32_32";
+            case Regs::VertexAttribute::Size::Size_32_32_32:
+                return "Size_32_32_32";
+            case Regs::VertexAttribute::Size::Size_16_16_16_16:
+                return "Size_16_16_16_16";
+            case Regs::VertexAttribute::Size::Size_32_32:
+                return "Size_32_32";
+            case Regs::VertexAttribute::Size::Size_16_16_16:
+                return "Size_16_16_16";
+            case Regs::VertexAttribute::Size::Size_8_8_8_8:
+                return "Size_8_8_8_8";
+            case Regs::VertexAttribute::Size::Size_16_16:
+                return "Size_16_16";
+            case Regs::VertexAttribute::Size::Size_32:
+                return "Size_32";
+            case Regs::VertexAttribute::Size::Size_8_8_8:
+                return "Size_8_8_8";
+            case Regs::VertexAttribute::Size::Size_8_8:
+                return "Size_8_8";
+            case Regs::VertexAttribute::Size::Size_16:
+                return "Size_16";
+            case Regs::VertexAttribute::Size::Size_8:
+                return "Size_8";
+            case Regs::VertexAttribute::Size::Size_10_10_10_2:
+                return "Size_10_10_10_2";
+            case Regs::VertexAttribute::Size::Size_11_11_10:
+                return "Size_11_11_10";
+            }
+            break;
+        case 4:
+            switch (arg.type) {
+            case Regs::VertexAttribute::Type::SignedNorm:
+                return "SignedNorm";
+            case Regs::VertexAttribute::Type::UnsignedNorm:
+                return "UnsignedNorm";
+            case Regs::VertexAttribute::Type::SignedInt:
+                return "SignedInt";
+            case Regs::VertexAttribute::Type::UnsignedInt:
+                return "UnsignedInt";
+            case Regs::VertexAttribute::Type::UnsignedScaled:
+                return "UnsignedScaled";
+            case Regs::VertexAttribute::Type::SignedScaled:
+                return "SignedScaled";
+            case Regs::VertexAttribute::Type::Float:
+                return "Float";
+            }
+            break;
+        case 5:
+            return fmt::format("{}", arg.bgra);
+        case 6:
+            return fmt::format("0x{:X}", arg.hex);
+        }
+        break;
+    }
+    }
+    return fmt::format("0x{:X}", entry.arg);
 }
 
-std::string Record::GetKeplerComputeArg(u32 method, u32 arg) {
+std::string Record::GetKeplerComputeArg(GPU::RecordEntry& entry, REG_LIST::const_iterator method,
+                                        size_t i) {
     return "";
 }
 
-std::string Record::GetKeplerMemoryArg(u32 method, u32 arg) {
+std::string Record::GetKeplerMemoryArg(GPU::RecordEntry& entry, REG_LIST::const_iterator method,
+                                       size_t i) {
     return "";
 }
 
-std::string Record::GetMaxwellDMAArg(u32 method, u32 arg) {
+std::string Record::GetMaxwellDMAArg(GPU::RecordEntry& entry, REG_LIST::const_iterator method,
+                                     size_t i) {
     return "";
 }
 
@@ -87,7 +270,20 @@ std::string Record::GetMaxwellDMAArg(u32 method, u32 arg) {
         {0x0048, 0x01, 0x01, 0x0045, 0x01, 0x04, "macros.bind"},
         {0x0049, 0x01, 0x01, 0x0049, 0x01, 0x01, "shadow_ram_control"},
         {0x004A, 0x16, 0x01, 0x004A, 0x01, 0x01, "unk_004A(OFFSET)"},
-        {0x0060, 0x01, 0x0C, 0x0060, 0x01, 0x01, "upload"},
+        {0x0060, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.line_length_in"},
+        {0x0061, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.line_count"},
+        {0x0062, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.address_high"},
+        {0x0063, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.address_low"},
+        {0x0064, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.pitch"},
+        {0x0065, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.block_width"},
+        {0x0065, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.block_height"},
+        {0x0065, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.block_depth"},
+        {0x0066, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.width"},
+        {0x0067, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.height"},
+        {0x0068, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.depth"},
+        {0x0069, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.z"},
+        {0x006A, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.x"},
+        {0x006B, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.y"},
         {0x006C, 0x01, 0x01, 0x006C, 0x01, 0x01, "exec_upload.linear"},
         {0x006D, 0x01, 0x01, 0x006D, 0x01, 0x01, "data_upload"},
         {0x006E, 0x16, 0x01, 0x006E, 0x01, 0x01, "unk_006E(OFFSET)"},
@@ -105,9 +301,17 @@ std::string Record::GetMaxwellDMAArg(u32 method, u32 arg) {
         {0x00CD, 0x02, 0x01, 0x00CD, 0x01, 0x01, "tess_level_inner(OFFSET)"},
         {0x00CF, 0x10, 0x01, 0x00CF, 0x01, 0x01, "unk_00CF(OFFSET)"},
         {0x00DF, 0x01, 0x01, 0x00DF, 0x01, 0x01, "rasterize_enable"},
-        {0x00E0, 0x04, 0x08, 0x00E0, 0x01, 0x01, "tfb_bindings(OFFSET)"},
+        {0x00E0, 0x01, 0x01, 0x00E0, 0x04, 0x08, "tfb_bindings(OFFSET).buffer_enable"},
+        {0x00E1, 0x01, 0x01, 0x00E0, 0x04, 0x08, "tfb_bindings(OFFSET).address_high"},
+        {0x00E2, 0x01, 0x01, 0x00E0, 0x04, 0x08, "tfb_bindings(OFFSET).address_low"},
+        {0x00E3, 0x01, 0x01, 0x00E0, 0x04, 0x08, "tfb_bindings(OFFSET).buffer_size"},
+        {0x00E4, 0x01, 0x01, 0x00E0, 0x04, 0x08, "tfb_bindings(OFFSET).buffer_offset"},
+        {0x00E5, 0x03, 0x01, 0x00E0, 0x04, 0x08, "tfb_bindings(OFFSET).unk_00E5(OFFSET)"},
         {0x0100, 0xC0, 0x01, 0x0100, 0x01, 0x01, "unk_0100(OFFSET)"},
-        {0x01C0, 0x04, 0x04, 0x01C0, 0x01, 0x01, "tfb_layouts(OFFSET)"},
+        {0x01C0, 0x01, 0x01, 0x01C0, 0x04, 0x04, "tfb_layouts(OFFSET).stream"},
+        {0x01C1, 0x01, 0x01, 0x01C0, 0x04, 0x04, "tfb_layouts(OFFSET).varying_count"},
+        {0x01C2, 0x01, 0x01, 0x01C0, 0x04, 0x04, "tfb_layouts(OFFSET).stride"},
+        {0x01C3, 0x01, 0x01, 0x01C0, 0x04, 0x04, "tfb_layouts(OFFSET).unk_01C3"},
         {0x01D0, 0x01, 0x01, 0x01D0, 0x01, 0x01, "unk_01D0(OFFSET)"},
         {0x01D1, 0x01, 0x01, 0x01D1, 0x01, 0x01, "tfb_enabled"},
         {0x01D2, 0x2E, 0x01, 0x01D2, 0x01, 0x01, "unk_01D2(OFFSET)"},
@@ -116,14 +320,34 @@ std::string Record::GetMaxwellDMAArg(u32 method, u32 arg) {
         {0x0202, 0x01, 0x01, 0x0200, 0x08, 0x10, "rt(OFFSET).width"},
         {0x0203, 0x01, 0x01, 0x0200, 0x08, 0x10, "rt(OFFSET).height"},
         {0x0204, 0x01, 0x01, 0x0200, 0x08, 0x10, "rt(OFFSET).format"},
-        {0x0205, 0x01, 0x01, 0x0200, 0x08, 0x10, "rt(OFFSET).tile_mode"},
+        {0x0205, 0x01, 0x01, 0x0200, 0x08, 0x10, "rt(OFFSET).tile_mode.block_width"},
+        {0x0205, 0x01, 0x01, 0x0200, 0x08, 0x10, "rt(OFFSET).tile_mode.block_height"},
+        {0x0205, 0x01, 0x01, 0x0200, 0x08, 0x10, "rt(OFFSET).tile_mode.block_depth"},
+        {0x0205, 0x01, 0x01, 0x0200, 0x08, 0x10, "rt(OFFSET).tile_mode.is_pitch_linear"},
+        {0x0205, 0x01, 0x01, 0x0200, 0x08, 0x10, "rt(OFFSET).tile_mode.is_3d"},
         {0x0206, 0x01, 0x01, 0x0200, 0x08, 0x10, "rt(OFFSET).depth"},
         {0x0206, 0x01, 0x01, 0x0200, 0x08, 0x10, "rt(OFFSET).volume"},
         {0x0207, 0x01, 0x01, 0x0200, 0x08, 0x10, "rt(OFFSET).layer_stride"},
         {0x0208, 0x01, 0x01, 0x0200, 0x08, 0x10, "rt(OFFSET).base_layer"},
         {0x0209, 0x07, 0x01, 0x0200, 0x08, 0x10, "rt(OFFSET).unk_0209"},
-        {0x0280, 0x10, 0x08, 0x0280, 0x01, 0x01, "viewport_transform(OFFSET)"},
-        {0x0300, 0x10, 0x04, 0x0300, 0x01, 0x01, "viewports(OFFSET)"},
+        {0x0280, 0x01, 0x01, 0x0280, 0x10, 0x08, "viewport_transform(OFFSET).scale_x"},
+        {0x0281, 0x01, 0x01, 0x0280, 0x10, 0x08, "viewport_transform(OFFSET).scale_y"},
+        {0x0282, 0x01, 0x01, 0x0280, 0x10, 0x08, "viewport_transform(OFFSET).scale_z"},
+        {0x0283, 0x01, 0x01, 0x0280, 0x10, 0x08, "viewport_transform(OFFSET).translate_x"},
+        {0x0284, 0x01, 0x01, 0x0280, 0x10, 0x08, "viewport_transform(OFFSET).translate_y"},
+        {0x0285, 0x01, 0x01, 0x0280, 0x10, 0x08, "viewport_transform(OFFSET).translate_z"},
+        {0x0286, 0x01, 0x01, 0x0280, 0x10, 0x08, "viewport_transform(OFFSET).swizzle.raw"},
+        {0x0286, 0x01, 0x01, 0x0280, 0x10, 0x08, "viewport_transform(OFFSET).swizzle.x"},
+        {0x0286, 0x01, 0x01, 0x0280, 0x10, 0x08, "viewport_transform(OFFSET).swizzle.y"},
+        {0x0286, 0x01, 0x01, 0x0280, 0x10, 0x08, "viewport_transform(OFFSET).swizzle.z"},
+        {0x0286, 0x01, 0x01, 0x0280, 0x10, 0x08, "viewport_transform(OFFSET).swizzle.w"},
+        {0x0287, 0x01, 0x01, 0x0280, 0x10, 0x08, "viewport_transform(OFFSET).unk_0287"},
+        {0x0300, 0x01, 0x01, 0x0300, 0x10, 0x04, "viewports(OFFSET).x"},
+        {0x0300, 0x01, 0x01, 0x0300, 0x10, 0x04, "viewports(OFFSET).width"},
+        {0x0301, 0x01, 0x01, 0x0300, 0x10, 0x04, "viewports(OFFSET).y"},
+        {0x0301, 0x01, 0x01, 0x0300, 0x10, 0x04, "viewports(OFFSET).height"},
+        {0x0302, 0x01, 0x01, 0x0300, 0x10, 0x04, "viewports(OFFSET).depth_range_near"},
+        {0x0303, 0x01, 0x01, 0x0300, 0x10, 0x04, "viewports(OFFSET).depth_range_far"},
         {0x0340, 0x1D, 0x01, 0x0340, 0x01, 0x01, "unk_0340(OFFSET)"},
         {0x035D, 0x01, 0x01, 0x035D, 0x01, 0x02, "vertex_buffer.first"},
         {0x035E, 0x01, 0x01, 0x035D, 0x01, 0x02, "vertex_buffer.count"},
@@ -143,7 +367,12 @@ std::string Record::GetMaxwellDMAArg(u32 method, u32 arg) {
         {0x0374, 0x04, 0x01, 0x0374, 0x01, 0x01, "unk_0374(OFFSET)"},
         {0x0378, 0x01, 0x01, 0x0378, 0x01, 0x01, "fragment_barrier"},
         {0x0379, 0x07, 0x01, 0x0379, 0x01, 0x01, "unk_0379(OFFSET)"},
-        {0x0380, 0x10, 0x04, 0x0380, 0x01, 0x01, "scissor_test(OFFSET)"},
+        {0x0380, 0x01, 0x01, 0x0380, 0x10, 0x04, "scissor_test(OFFSET).enable"},
+        {0x0381, 0x01, 0x01, 0x0380, 0x10, 0x04, "scissor_test(OFFSET).min_x"},
+        {0x0381, 0x01, 0x01, 0x0380, 0x10, 0x04, "scissor_test(OFFSET).max_x"},
+        {0x0382, 0x01, 0x01, 0x0380, 0x10, 0x04, "scissor_test(OFFSET).min_y"},
+        {0x0382, 0x01, 0x01, 0x0380, 0x10, 0x04, "scissor_test(OFFSET).max_y"},
+        {0x0383, 0x01, 0x01, 0x0380, 0x10, 0x04, "scissor_test(OFFSET).fill"},
         {0x03C0, 0x15, 0x01, 0x03C0, 0x01, 0x01, "unk_03C0(OFFSET)"},
         {0x03D5, 0x01, 0x01, 0x03D5, 0x01, 0x01, "stencil_back_func_ref"},
         {0x03D6, 0x01, 0x01, 0x03D6, 0x01, 0x01, "stencil_back_mask"},
@@ -166,7 +395,11 @@ std::string Record::GetMaxwellDMAArg(u32 method, u32 arg) {
         {0x03F8, 0x01, 0x01, 0x03F8, 0x01, 0x05, "zeta.address_high"},
         {0x03F9, 0x01, 0x01, 0x03F8, 0x01, 0x05, "zeta.address_low"},
         {0x03FA, 0x01, 0x01, 0x03F8, 0x01, 0x05, "zeta.format"},
-        {0x03FB, 0x01, 0x01, 0x03F8, 0x01, 0x05, "zeta.tile_mode"},
+        {0x03FB, 0x01, 0x01, 0x03F8, 0x01, 0x05, "zeta.tile_mode.block_width"},
+        {0x03FB, 0x01, 0x01, 0x03F8, 0x01, 0x05, "zeta.tile_mode.block_height"},
+        {0x03FB, 0x01, 0x01, 0x03F8, 0x01, 0x05, "zeta.tile_mode.block_depth"},
+        {0x03FB, 0x01, 0x01, 0x03F8, 0x01, 0x05, "zeta.tile_mode.is_pitch_linear"},
+        {0x03FB, 0x01, 0x01, 0x03F8, 0x01, 0x05, "zeta.tile_mode.is_3d"},
         {0x03FC, 0x01, 0x01, 0x03F8, 0x01, 0x05, "zeta.layer_stride"},
         {0x03FD, 0x01, 0x01, 0x03FD, 0x01, 0x02, "render_area.x"},
         {0x03FD, 0x01, 0x01, 0x03FD, 0x01, 0x02, "render_area.width"},
@@ -180,8 +413,21 @@ std::string Record::GetMaxwellDMAArg(u32 method, u32 arg) {
         {0x043F, 0x10, 0x01, 0x043F, 0x01, 0x01, "unk_043F(OFFSET)"},
         {0x044F, 0x01, 0x01, 0x044F, 0x01, 0x01, "fill_rectangle"},
         {0x0450, 0x08, 0x01, 0x0450, 0x01, 0x01, "unk_0450(OFFSET)"},
-        {0x0458, 0x20, 0x01, 0x0458, 0x01, 0x01, "vertex_attrib_format(OFFSET)"},
-        {0x0478, 0x04, 0x01, 0x0478, 0x01, 0x01, "multisample_sample_locations(OFFSET)"},
+        {0x0458, 0x01, 0x01, 0x0458, 0x20, 0x01, "vertex_attrib_format(OFFSET).buffer"},
+        {0x0458, 0x01, 0x01, 0x0458, 0x20, 0x01, "vertex_attrib_format(OFFSET).constant"},
+        {0x0458, 0x01, 0x01, 0x0458, 0x20, 0x01, "vertex_attrib_format(OFFSET).offset"},
+        {0x0458, 0x01, 0x01, 0x0458, 0x20, 0x01, "vertex_attrib_format(OFFSET).size"},
+        {0x0458, 0x01, 0x01, 0x0458, 0x20, 0x01, "vertex_attrib_format(OFFSET).type"},
+        {0x0458, 0x01, 0x01, 0x0458, 0x20, 0x01, "vertex_attrib_format(OFFSET).bgra"},
+        {0x0458, 0x01, 0x01, 0x0458, 0x20, 0x01, "vertex_attrib_format(OFFSET).hex"},
+        {0x0478, 0x01, 0x01, 0x0478, 0x04, 0x01, "multisample_sample_locations(OFFSET).x0"},
+        {0x0478, 0x01, 0x01, 0x0478, 0x04, 0x01, "multisample_sample_locations(OFFSET).y0"},
+        {0x0478, 0x01, 0x01, 0x0478, 0x04, 0x01, "multisample_sample_locations(OFFSET).x1"},
+        {0x0478, 0x01, 0x01, 0x0478, 0x04, 0x01, "multisample_sample_locations(OFFSET).y1"},
+        {0x0478, 0x01, 0x01, 0x0478, 0x04, 0x01, "multisample_sample_locations(OFFSET).x2"},
+        {0x0478, 0x01, 0x01, 0x0478, 0x04, 0x01, "multisample_sample_locations(OFFSET).y2"},
+        {0x0478, 0x01, 0x01, 0x0478, 0x04, 0x01, "multisample_sample_locations(OFFSET).x3"},
+        {0x0478, 0x01, 0x01, 0x0478, 0x04, 0x01, "multisample_sample_locations(OFFSET).y3"},
         {0x047C, 0x02, 0x01, 0x047C, 0x01, 0x01, "unk_047C(OFFSET)"},
         {0x047E, 0x01, 0x01, 0x047E, 0x01, 0x01, "multisample_coverage_to_color.enable"},
         {0x047E, 0x01, 0x01, 0x047E, 0x01, 0x01, "multisample_coverage_to_color.target"},
@@ -340,7 +586,10 @@ std::string Record::GetMaxwellDMAArg(u32 method, u32 arg) {
         {0x0674, 0x01, 0x01, 0x0674, 0x01, 0x01, "clear_buffers.RT"},
         {0x0674, 0x01, 0x01, 0x0674, 0x01, 0x01, "clear_buffers.layer"},
         {0x0675, 0x0B, 0x01, 0x0675, 0x01, 0x01, "unk_0675(OFFSET)"},
-        {0x0680, 0x08, 0x01, 0x0680, 0x01, 0x01, "color_mask(OFFSET)"},
+        {0x0680, 0x01, 0x01, 0x0680, 0x08, 0x01, "color_mask(OFFSET).R"},
+        {0x0680, 0x01, 0x01, 0x0680, 0x08, 0x01, "color_mask(OFFSET).G"},
+        {0x0680, 0x01, 0x01, 0x0680, 0x08, 0x01, "color_mask(OFFSET).B"},
+        {0x0680, 0x01, 0x01, 0x0680, 0x08, 0x01, "color_mask(OFFSET).A"},
         {0x0688, 0x38, 0x01, 0x0688, 0x01, 0x01, "unk_0688(OFFSET)"},
         {0x06C0, 0x01, 0x01, 0x06C0, 0x01, 0x04, "query.query_address_high"},
         {0x06C1, 0x01, 0x01, 0x06C0, 0x01, 0x04, "query.query_address_low"},
@@ -358,7 +607,14 @@ std::string Record::GetMaxwellDMAArg(u32 method, u32 arg) {
         {0x0701, 0x01, 0x01, 0x0700, 0x20, 0x04, "vertex_array(OFFSET).start_high"},
         {0x0702, 0x01, 0x01, 0x0700, 0x20, 0x04, "vertex_array(OFFSET).start_low"},
         {0x0703, 0x01, 0x01, 0x0700, 0x20, 0x04, "vertex_array(OFFSET).divisor"},
-        {0x0780, 0x08, 0x08, 0x0780, 0x01, 0x01, "independent_blend(OFFSET)"},
+        {0x0780, 0x01, 0x01, 0x0780, 0x08, 0x08, "independent_blend(OFFSET).separate_alpha"},
+        {0x0781, 0x01, 0x01, 0x0780, 0x08, 0x08, "independent_blend(OFFSET).equation_rgb"},
+        {0x0782, 0x01, 0x01, 0x0780, 0x08, 0x08, "independent_blend(OFFSET).factor_source_rgb"},
+        {0x0783, 0x01, 0x01, 0x0780, 0x08, 0x08, "independent_blend(OFFSET).factor_dest_rgb"},
+        {0x0784, 0x01, 0x01, 0x0780, 0x08, 0x08, "independent_blend(OFFSET).equation_a"},
+        {0x0785, 0x01, 0x01, 0x0780, 0x08, 0x08, "independent_blend(OFFSET).factor_source_a"},
+        {0x0786, 0x01, 0x01, 0x0780, 0x08, 0x08, "independent_blend(OFFSET).factor_dest_a"},
+        {0x0787, 0x01, 0x01, 0x0780, 0x08, 0x08, "independent_blend(OFFSET).unk_0787"},
         {0x07C0, 0x01, 0x01, 0x07C0, 0x20, 0x02, "vertex_array_limit(OFFSET).limit_high"},
         {0x07C1, 0x01, 0x01, 0x07C0, 0x20, 0x02, "vertex_array_limit(OFFSET).limit_low"},
         {0x0800, 0x01, 0x01, 0x0800, 0x06, 0x10, "shader_config(OFFSET).enable"},
@@ -387,6 +643,7 @@ std::string Record::GetMaxwellDMAArg(u32 method, u32 arg) {
         {0x0D2A, 0x05, 0x01, 0x0D2A, 0x01, 0x0A, "tex_info_buffers.address(OFFSET)"},
         {0x0D2F, 0x05, 0x01, 0x0D2A, 0x01, 0x0A, "tex_info_buffers.size(OFFSET)"},
         {0x0D34, 0xCC, 0x01, 0x0D34, 0x01, 0x01, "unk_0D34(OFFSET)"},
+        {0x0E00, 0x1000, 0x01, 0x0E00, 0x01, 0x01, "Macro(OFFSET)"},
     }};
 }
 
@@ -408,9 +665,8 @@ static constexpr REG_LIST METHODS_KEPLERCOMPUTE{BuildKeplerComputeMethods()};
 static constexpr REG_LIST METHODS_KEPLERMEMORY{BuildKeplerMemoryMethods()};
 static constexpr REG_LIST METHODS_MAXWELLDMA{BuildMaxwellDMAMethods()};
 
-#pragma optimize("", off)
-std::vector<std::string> Record::GetMethodNames(GPU::RecordEntry& entry) {
-    std::vector<std::string> methods_found;
+std::optional<std::tuple<REG_LIST::const_iterator, size_t, size_t>> FindMethod(
+    GPU::RecordEntry& entry) {
     const REG_LIST* methods = nullptr;
 
     switch (entry.engine) {
@@ -435,13 +691,7 @@ std::vector<std::string> Record::GetMethodNames(GPU::RecordEntry& entry) {
     }
 
     if (!methods) {
-        methods_found.emplace_back("Unknown");
-        return methods_found;
-    }
-
-    if (entry.method >= 0xE00) {
-        methods_found.emplace_back(fmt::format("Macro[{}]", (entry.method - 0xE00) / 2));
-        return methods_found;
+        return std::nullopt;
     }
 
     for (const auto& method : *methods) {
@@ -455,7 +705,6 @@ std::vector<std::string> Record::GetMethodNames(GPU::RecordEntry& entry) {
             auto start_it =
                 std::find_if(methods->cbegin(), methods->cend(),
                              [&method](const auto& a) { return a.offset == method.struct_base; });
-            // Find the method which contains what we're looking for
             while (start_it->offset < base_offset) {
                 start_it++;
             }
@@ -464,42 +713,55 @@ std::vector<std::string> Record::GetMethodNames(GPU::RecordEntry& entry) {
                 start_it--;
             }
 
-            const size_t struct_idx = (entry.method - method.struct_base) / method.struct_size;
+            size_t struct_idx = (entry.method - method.struct_base) / method.struct_size;
             size_t element_idx = (base_offset - start_it->offset) / method.elem_size;
             if (base_offset == start_it->offset) {
                 element_idx = struct_idx;
             }
-            const u32 found_offset = start_it->offset;
-
-            while (start_it < methods->cend() && start_it->offset == found_offset) {
-                std::string name{start_it->name};
-
-                if (start_it->struct_count > 1) {
-                    size_t it = name.find("(OFFSET)");
-                    if (it != std::string::npos) {
-                        const std::string pref = name.substr(0, it);
-                        const std::string suff = name.substr(it + 8);
-                        name = pref + fmt::format("[{}]", struct_idx) + suff;
-                    }
-                }
-
-                if (start_it->elem_count > 1) {
-                    size_t it = name.find("(OFFSET)");
-                    if (it != std::string::npos) {
-                        const std::string pref = name.substr(0, it);
-                        const std::string suff = name.substr(it + 8);
-                        name = pref + fmt::format("[{}]", element_idx) + suff;
-                    }
-                }
-
-                methods_found.emplace_back(name);
-                ++start_it;
-            }
-            return methods_found;
+            return std::make_optional<std::tuple<REG_LIST::const_iterator, size_t, size_t>>(
+                std::make_tuple(start_it, struct_idx, element_idx));
         }
     }
+    return std::nullopt;
+}
 
-    methods_found.emplace_back("Unknown");
+#pragma optimize("", off)
+std::vector<std::string> Record::GetMethodNames(GPU::RecordEntry& entry,
+                                                REG_LIST::const_iterator start_it,
+                                                size_t struct_idx, size_t element_idx) {
+    std::vector<std::string> methods_found;
+
+    if (entry.method >= 0xE00) {
+        methods_found.emplace_back(
+            fmt::format("Macro[{}]", (entry.method - start_it->struct_base) / 2));
+        return methods_found;
+    }
+
+    const u32 found_offset = start_it->offset;
+    while (start_it->offset == found_offset) {
+        std::string name{start_it->name};
+
+        if (start_it->struct_count > 1) {
+            size_t it = name.find("(OFFSET)");
+            if (it != std::string::npos) {
+                const std::string pref = name.substr(0, it);
+                const std::string suff = name.substr(it + 8);
+                name = pref + fmt::format("[{}]", struct_idx) + suff;
+            }
+        }
+
+        if (start_it->elem_count > 1) {
+            size_t it = name.find("(OFFSET)");
+            if (it != std::string::npos) {
+                const std::string pref = name.substr(0, it);
+                const std::string suff = name.substr(it + 8);
+                name = pref + fmt::format("[{}]", element_idx) + suff;
+            }
+        }
+
+        methods_found.emplace_back(name);
+        ++start_it;
+    }
     return methods_found;
 }
 #pragma optimize("", on)
