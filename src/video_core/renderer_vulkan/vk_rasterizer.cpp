@@ -36,6 +36,7 @@
 #include "video_core/texture_cache/texture_cache.h"
 #include "video_core/vulkan_common/vulkan_device.h"
 #include "video_core/vulkan_common/vulkan_wrapper.h"
+#include "video_core/record.h"
 
 namespace Vulkan {
 
@@ -264,6 +265,13 @@ RasterizerVulkan::~RasterizerVulkan() = default;
 
 void RasterizerVulkan::Draw(bool is_indexed, bool is_instanced) {
     MICROPROFILE_SCOPE(Vulkan_Drawing);
+
+    if constexpr (Tegra::Record::RECORD_ENGINE[Tegra::Record::GetEngineIndex(
+                      Tegra::EngineID::MAXWELL_B)]) {
+        if (gpu.CURRENTLY_RECORDING) {
+            gpu.RECORD_DRAW++;
+        }
+    }
 
     SCOPE_EXIT({ gpu.TickWork(); });
     FlushWork();

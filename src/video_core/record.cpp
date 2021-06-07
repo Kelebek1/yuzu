@@ -1,5 +1,6 @@
 #include <optional>
 #include "record.h"
+#include "surface.h"
 
 namespace Tegra {
 #pragma optimize("", off)
@@ -45,7 +46,6 @@ void Record::Print(Tegra::GPU* gpu, size_t frame) {
     }
     LOG_INFO(Render_OpenGL, "\n{}", out);
 }
-#pragma optimize("", on)
 
 [[nodiscard]] std::string Record::GetArgumentInfo(GPU::RecordEntry& entry,
                                                   REG_LIST::const_iterator foundMethod, size_t i) {
@@ -75,8 +75,10 @@ std::string Record::GetMaxwellArg(GPU::RecordEntry& entry, REG_LIST::const_itera
     using Regs = Maxwell::Regs;
 
     switch (method->offset) {
+
     case REG(wait_for_idle):
         return fmt::format("{}", static_cast<bool>(entry.arg));
+
     case REG(shadow_ram_control): {
         const auto arg = *(Regs::ShadowRamControl*)(&entry.arg);
         switch (arg) {
@@ -115,6 +117,9 @@ std::string Record::GetMaxwellArg(GPU::RecordEntry& entry, REG_LIST::const_itera
     case REG(exec_upload.linear):
         return fmt::format("{}", static_cast<bool>(entry.arg));
 
+    case REG(force_early_fragment_tests):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+
     case REG(sync_info): {
         switch (i) {
         case 0:
@@ -133,22 +138,22 @@ std::string Record::GetMaxwellArg(GPU::RecordEntry& entry, REG_LIST::const_itera
             const auto arg = *(Regs::TessellationPrimitive*)(&entry.arg);
             switch (arg) {
             case Regs::TessellationPrimitive::Isolines:
-                return fmt::format("Isolines");
+                return "Isolines";
             case Regs::TessellationPrimitive::Triangles:
-                return fmt::format("Triangles");
+                return "Triangles";
             case Regs::TessellationPrimitive::Quads:
-                return fmt::format("Quads");
+                return "Quads";
             }
         } break;
         case 1: {
             const auto arg = *(Regs::TessellationSpacing*)(&entry.arg);
             switch (arg) {
             case Regs::TessellationSpacing::Equal:
-                return fmt::format("Equal");
+                return "Equal";
             case Regs::TessellationSpacing::FractionalOdd:
-                return fmt::format("FractionalOdd");
+                return "FractionalOdd";
             case Regs::TessellationSpacing::FractionalEven:
-                return fmt::format("FractionalEven");
+                return "FractionalEven";
             }
         } break;
         case 2:
@@ -159,14 +164,253 @@ std::string Record::GetMaxwellArg(GPU::RecordEntry& entry, REG_LIST::const_itera
         break;
     }
     case REG(tess_level_outer):
-        return fmt::format("{}", static_cast<f32>(entry.arg));
+        return fmt::format("{:.02f}f", *(f32*)(&entry.arg));
     case REG(tess_level_inner):
-        return fmt::format("{}", static_cast<f32>(entry.arg));
+        return fmt::format("{:.02f}f", *(f32*)(&entry.arg));
 
-    case REG(tfb_bindings[0].buffer_enable):
+    case REG(rasterize_enable):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+
+    case REG(tfb_bindings) + REG(tfb_bindings[0].buffer_enable):
         return fmt::format("{}", static_cast<bool>(entry.arg));
 
     case REG(tfb_enabled):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+
+    case REG(rt) + REG(rt[0].width):
+        return fmt::format("{}", entry.arg);
+    case REG(rt) + REG(rt[0].height):
+        return fmt::format("{}", entry.arg);
+    case REG(rt) + REG(rt[0].format): {
+        const auto arg = *(Tegra::RenderTargetFormat*)(&entry.arg);
+        const auto format = VideoCore::Surface::PixelFormatFromRenderTargetFormat(arg);
+        return fmt::format("{}", VideoCore::Surface::GetPixelFormatName(format));
+    }
+    case REG(rt) + REG(rt[0].tile_mode): {
+        switch (i) {
+        case 0:
+        case 1:
+        case 2:
+            return fmt::format("{}", entry.arg);
+        case 3:
+        case 4:
+            return fmt::format("{}", static_cast<bool>(entry.arg));
+        }
+        break;
+    }
+    case REG(rt) + REG(rt[0].depth): {
+        switch (i) {
+        case 0:
+            return fmt::format("{}", entry.arg & 0xFFFF);
+        case 1:
+            return fmt::format("{}", (entry.arg >> 16) & 1);
+        }
+        break;
+    }
+    case REG(rt) + REG(rt[0].base_layer):
+        return fmt::format("{}", entry.arg);
+
+    case REG(viewport_transform) + REG(viewport_transform[0].scale_x):
+    case REG(viewport_transform) + REG(viewport_transform[0].scale_y):
+    case REG(viewport_transform) + REG(viewport_transform[0].scale_z):
+    case REG(viewport_transform) + REG(viewport_transform[0].translate_x):
+    case REG(viewport_transform) + REG(viewport_transform[0].translate_y):
+    case REG(viewport_transform) + REG(viewport_transform[0].translate_z):
+        return fmt::format("{:.02f}f", *(f32*)(&entry.arg));
+    case REG(viewport_transform) + REG(viewport_transform[0].swizzle): {
+        switch (i) {
+        case 0:
+            return fmt::format("{:X}", entry.arg);
+        case 1:
+            return fmt::format("{}", entry.arg & 0x7);
+        case 2:
+            return fmt::format("{}", (entry.arg >> 4) & 0x7);
+        case 3:
+            return fmt::format("{}", (entry.arg >> 8) & 0x7);
+        case 4:
+            return fmt::format("{}", (entry.arg >> 12) & 0x7);
+        }
+        break;
+    }
+
+    case REG(viewports) + REG(viewports[0].x): {
+        switch (i) {
+        case 0:
+            return fmt::format("{}", entry.arg & 0xFFFF);
+        case 1:
+            return fmt::format("{}", (entry.arg >> 16) & 0xFFFF);
+        }
+        break;
+    }
+    case REG(viewports) + REG(viewports[0].y): {
+        switch (i) {
+        case 0:
+            return fmt::format("{}", entry.arg & 0xFFFF);
+        case 1:
+            return fmt::format("{}", (entry.arg >> 16) & 0xFFFF);
+        }
+        break;
+    }
+    case REG(viewports) + REG(viewports[0].depth_range_near):
+    case REG(viewports) + REG(viewports[0].depth_range_far):
+        return fmt::format("{:.02f}f", *(f32*)(&entry.arg));
+
+    case REG(depth_mode): {
+        const auto arg = *(Regs::DepthMode*)(&entry.arg);
+        switch (arg) {
+        case Regs::DepthMode::MinusOneToOne:
+            return "MinusOneToOne";
+        case Regs::DepthMode::ZeroToOne:
+            return "ZeroToOne";
+        }
+        break;
+    }
+
+    case REG(clear_color):
+    case REG(clear_depth):
+        return fmt::format("{:.02f}f", *(f32*)(&entry.arg));
+
+    case REG(polygon_mode_front):
+    case REG(polygon_mode_back): {
+        const auto arg = *(Regs::PolygonMode*)(&entry.arg);
+        switch (arg) {
+        case Regs::PolygonMode::Point:
+            return "Point";
+        case Regs::PolygonMode::Line:
+            return "Line";
+        case Regs::PolygonMode::Fill:
+            return "Fill";
+        }
+        break;
+    }
+
+    case REG(polygon_offset_point_enable):
+    case REG(polygon_offset_line_enable):
+    case REG(polygon_offset_fill_enable):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+
+    case REG(scissor_test) + REG(scissor_test[0].enable):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+    case REG(scissor_test) + REG(scissor_test[0].min_x): {
+        switch (i) {
+        case 0:
+            return fmt::format("{}", entry.arg & 0xFFFF);
+        case 1:
+            return fmt::format("{}", (entry.arg >> 16) & 0xFFFF);
+        }
+        break;
+    }
+    case REG(scissor_test) + REG(scissor_test[0].min_y): {
+        switch (i) {
+        case 0:
+            return fmt::format("{}", entry.arg & 0xFFFF);
+        case 1:
+            return fmt::format("{}", (entry.arg >> 16) & 0xFFFF);
+        }
+        break;
+    }
+
+    case REG(invalidate_texture_data_cache):
+    case REG(invalidate_sampler_cache_no_wfi):
+    case REG(invalidate_texture_header_cache_no_wfi): {
+        switch (i) {
+        case 0: {
+            switch (entry.arg) {
+            case 0:
+                return "All";
+            case 1:
+                return "One";
+            }
+            break;
+        }
+        case 1:
+            return fmt::format("{}", (entry.arg >> 4) & 0x3FFFFF);
+        }
+        break;
+    }
+
+    case REG(color_mask_common):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+
+    case REG(depth_bounds):
+        return fmt::format("{:.02f}f", *(f32*)(&entry.arg));
+
+    case REG(rt_separate_frag_data):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+
+    case REG(multisample_raster_enable):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+    case REG(multisample_raster_samples):
+        return fmt::format("{}", entry.arg);
+
+    case REG(zeta.format): {
+        const auto arg = *(Tegra::DepthFormat*)(&entry.arg);
+        switch (arg) {
+        case Tegra::DepthFormat::D32_FLOAT:
+            return "D32_FLOAT";
+        case Tegra::DepthFormat::D16_UNORM:
+            return "D16_UNORM";
+        case Tegra::DepthFormat::S8_UINT_Z24_UNORM:
+            return "S8_UINT_Z24_UNORM";
+        case Tegra::DepthFormat::D24X8_UNORM:
+            return "D24X8_UNORM";
+        case Tegra::DepthFormat::D24S8_UNORM:
+            return "D24S8_UNORM";
+        case Tegra::DepthFormat::D24C8_UNORM:
+            return "D24C8_UNORM";
+        case Tegra::DepthFormat::D32_FLOAT_S8X24_UINT:
+            return "D32_FLOAT_S8X24_UINT";
+        }
+        break;
+    }
+
+    case REG(zeta.tile_mode): {
+        switch (i) {
+        case 0:
+        case 1:
+        case 2:
+            return fmt::format("{}", entry.arg);
+        case 3:
+        case 4:
+            return fmt::format("{}", static_cast<bool>(entry.arg));
+        }
+        break;
+    }
+
+    case REG(render_area.x): {
+        switch (i) {
+        case 0:
+            return fmt::format("{}", entry.arg & 0xFFFF);
+        case 1:
+            return fmt::format("{}", (entry.arg >> 16) & 0xFFFF);
+        }
+        break;
+    }
+    case REG(render_area.y): {
+        switch (i) {
+        case 0:
+            return fmt::format("{}", entry.arg & 0xFFFF);
+        case 1:
+            return fmt::format("{}", (entry.arg >> 16) & 0xFFFF);
+        }
+        break;
+    }
+
+    case REG(clear_flags): {
+        switch (i) {
+        case 0:
+            return fmt::format("{}", entry.arg & 0xF);
+        case 1:
+            return fmt::format("{}", (entry.arg >> 4) & 0xF);
+        case 2:
+            return fmt::format("{}", (entry.arg >> 8) & 0xF);
+        case 3:
+            return fmt::format("{}", (entry.arg >> 12) & 0xF);
+        }
+        break;
+    }
+
+    case REG(fill_rectangle):
         return fmt::format("{}", static_cast<bool>(entry.arg));
 
     case REG(vertex_attrib_format): {
@@ -237,7 +481,794 @@ std::string Record::GetMaxwellArg(GPU::RecordEntry& entry, REG_LIST::const_itera
         }
         break;
     }
+
+    case REG(multisample_sample_locations): {
+        const auto arg = *(Regs::MsaaSampleLocation*)(&entry.arg);
+        switch (i) {
+        case 0:
+            return fmt::format("{}", arg.x0);
+        case 1:
+            return fmt::format("{}", arg.y0);
+        case 2:
+            return fmt::format("{}", arg.x1);
+        case 3:
+            return fmt::format("{}", arg.y1);
+        case 4:
+            return fmt::format("{}", arg.x2);
+        case 5:
+            return fmt::format("{}", arg.y2);
+        case 6:
+            return fmt::format("{}", arg.x3);
+        case 7:
+            return fmt::format("{}", arg.y3);
+        }
+        break;
     }
+
+    case REG(multisample_coverage_to_color): {
+        switch (i) {
+        case 0:
+            return fmt::format("{}", static_cast<bool>(entry.arg & 1));
+        case 1:
+            return fmt::format("{}", (entry.arg >> 4) & 0x7);
+        }
+        break;
+    }
+
+    case REG(rt_control): {
+        switch (i) {
+        case 0:
+            return fmt::format("{}", entry.arg & 0xF);
+        case 1:
+            return fmt::format("{}", (entry.arg >> 4) & 0x7);
+        case 2:
+            return fmt::format("{}", (entry.arg >> 7) & 0x7);
+        case 3:
+            return fmt::format("{}", (entry.arg >> 10) & 0x7);
+        case 4:
+            return fmt::format("{}", (entry.arg >> 13) & 0x7);
+        case 5:
+            return fmt::format("{}", (entry.arg >> 16) & 0x7);
+        case 6:
+            return fmt::format("{}", (entry.arg >> 19) & 0x7);
+        case 7:
+            return fmt::format("{}", (entry.arg >> 22) & 0x7);
+        case 8:
+            return fmt::format("{}", (entry.arg >> 25) & 0x7);
+        }
+        break;
+    }
+
+    case REG(zeta_width):
+    case REG(zeta_height):
+        return fmt::format("{}", entry.arg);
+        return fmt::format("{}", entry.arg);
+
+    case REG(zeta_depth): {
+        switch (i) {
+        case 0:
+            return fmt::format("{}", entry.arg & 0xFFFF);
+        case 1:
+            return fmt::format("{}", (entry.arg >> 16) & 1);
+        }
+        break;
+    }
+
+    case REG(sampler_index): {
+        switch (entry.arg) {
+        case 0:
+            return "Independently";
+        case 1:
+            return "ViaHeaderIndex";
+        }
+        break;
+    }
+
+    case REG(depth_test_enable):
+    case REG(independent_blend_enable):
+    case REG(depth_write_enabled):
+    case REG(alpha_test_enabled):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+
+    case REG(d3d_cull_mode): {
+        switch (entry.arg) {
+        case 1:
+            return "None";
+        case 2:
+            return "Front";
+        case 3:
+            return "Back";
+        }
+        break;
+    }
+
+    case REG(depth_test_func):
+    case REG(alpha_test_func):
+    case REG(stencil_front_func_func):
+    case REG(stencil_back_func_func): {
+        const auto arg = *(Regs::ComparisonOp*)(&entry.arg);
+        switch (arg) {
+        case Regs::ComparisonOp::Never:
+        case Regs::ComparisonOp::NeverOld:
+            return "Never";
+        case Regs::ComparisonOp::Less:
+        case Regs::ComparisonOp::LessOld:
+            return "Less";
+        case Regs::ComparisonOp::Equal:
+        case Regs::ComparisonOp::EqualOld:
+            return "Equal";
+        case Regs::ComparisonOp::LessEqual:
+        case Regs::ComparisonOp::LessEqualOld:
+            return "LessEqual";
+        case Regs::ComparisonOp::Greater:
+        case Regs::ComparisonOp::GreaterOld:
+            return "Greater";
+        case Regs::ComparisonOp::NotEqual:
+        case Regs::ComparisonOp::NotEqualOld:
+            return "NotEqual";
+        case Regs::ComparisonOp::GreaterEqual:
+        case Regs::ComparisonOp::GreaterEqualOld:
+            return "GreaterEqual";
+        case Regs::ComparisonOp::Always:
+        case Regs::ComparisonOp::AlwaysOld:
+            return "Always";
+        }
+        break;
+    }
+
+    case REG(alpha_test_ref):
+        return fmt::format("{:.02f}f", *(f32*)(&entry.arg));
+
+    case REG(blend_color.r):
+    case REG(blend_color.b):
+    case REG(blend_color.g):
+    case REG(blend_color.a):
+        return fmt::format("{:.02f}f", *(f32*)(&entry.arg));
+
+    case REG(blend.separate_alpha):
+    case REG(independent_blend) + REG(independent_blend[0].separate_alpha):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+
+    case REG(blend.equation_rgb):
+    case REG(blend.equation_a):
+    case REG(independent_blend) + REG(independent_blend[0].equation_rgb):
+    case REG(independent_blend) + REG(independent_blend[0].equation_a): {
+        const auto arg = *(Regs::Blend::Equation*)(&entry.arg);
+        switch (arg) {
+        case Regs::Blend::Equation::Add:
+        case Regs::Blend::Equation::AddGL:
+            return "Add";
+        case Regs::Blend::Equation::Subtract:
+        case Regs::Blend::Equation::SubtractGL:
+            return "Subtract";
+        case Regs::Blend::Equation::ReverseSubtract:
+        case Regs::Blend::Equation::ReverseSubtractGL:
+            return "ReverseSubtract";
+        case Regs::Blend::Equation::Min:
+        case Regs::Blend::Equation::MinGL:
+            return "Min";
+        case Regs::Blend::Equation::Max:
+        case Regs::Blend::Equation::MaxGL:
+            return "Max";
+        }
+        break;
+    }
+
+    case REG(blend.factor_source_rgb):
+    case REG(blend.factor_dest_rgb):
+    case REG(blend.factor_source_a):
+    case REG(blend.factor_dest_a):
+    case REG(independent_blend) + REG(independent_blend[0].factor_source_rgb):
+    case REG(independent_blend) + REG(independent_blend[0].factor_dest_rgb):
+    case REG(independent_blend) + REG(independent_blend[0].factor_source_a):
+    case REG(independent_blend) + REG(independent_blend[0].factor_dest_a): {
+        const auto arg = *(Regs::Blend::Factor*)(&entry.arg);
+        switch (arg) {
+        case Regs::Blend::Factor::Zero:
+        case Regs::Blend::Factor::ZeroGL:
+            return "Zero";
+        case Regs::Blend::Factor::One:
+        case Regs::Blend::Factor::OneGL:
+            return "One";
+        case Regs::Blend::Factor::SourceColor:
+        case Regs::Blend::Factor::SourceColorGL:
+            return "SourceColor";
+        case Regs::Blend::Factor::OneMinusSourceColor:
+        case Regs::Blend::Factor::OneMinusSourceColorGL:
+            return "OneMinusSourceColor";
+        case Regs::Blend::Factor::SourceAlpha:
+        case Regs::Blend::Factor::SourceAlphaGL:
+            return "SourceAlpha";
+        case Regs::Blend::Factor::OneMinusSourceAlpha:
+        case Regs::Blend::Factor::OneMinusSourceAlphaGL:
+            return "OneMinusSourceAlpha";
+        case Regs::Blend::Factor::DestAlpha:
+        case Regs::Blend::Factor::DestAlphaGL:
+            return "DestAlpha";
+        case Regs::Blend::Factor::OneMinusDestAlpha:
+        case Regs::Blend::Factor::OneMinusDestAlphaGL:
+            return "OneMinusDestAlpha";
+        case Regs::Blend::Factor::DestColor:
+        case Regs::Blend::Factor::DestColorGL:
+            return "DestColor";
+        case Regs::Blend::Factor::OneMinusDestColor:
+        case Regs::Blend::Factor::OneMinusDestColorGL:
+            return "OneMinusDestColor";
+        case Regs::Blend::Factor::SourceAlphaSaturate:
+        case Regs::Blend::Factor::SourceAlphaSaturateGL:
+            return "SourceAlphaSaturate";
+        case Regs::Blend::Factor::Source1Color:
+        case Regs::Blend::Factor::ConstantColorGL:
+            return "Source1Color";
+        case Regs::Blend::Factor::OneMinusSource1Color:
+        case Regs::Blend::Factor::OneMinusConstantColorGL:
+            return "OneMinusSource1Color";
+        case Regs::Blend::Factor::Source1Alpha:
+        case Regs::Blend::Factor::ConstantAlphaGL:
+            return "Source1Alpha";
+        case Regs::Blend::Factor::OneMinusSource1Alpha:
+        case Regs::Blend::Factor::OneMinusConstantAlphaGL:
+            return "OneMinusSource1Alpha";
+        case Regs::Blend::Factor::ConstantColor:
+        case Regs::Blend::Factor::Source1ColorGL:
+            return "ConstantColor";
+        case Regs::Blend::Factor::OneMinusConstantColor:
+        case Regs::Blend::Factor::OneMinusSource1ColorGL:
+            return "OneMinusConstantColor";
+        case Regs::Blend::Factor::ConstantAlpha:
+        case Regs::Blend::Factor::Source1AlphaGL:
+            return "ConstantAlpha";
+        case Regs::Blend::Factor::OneMinusConstantAlpha:
+        case Regs::Blend::Factor::OneMinusSource1AlphaGL:
+            return "OneMinusConstantAlpha";
+        }
+        break;
+    }
+
+    case REG(blend.enable_common):
+    case REG(blend.enable):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+
+    case REG(stencil_enable):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+
+    case REG(stencil_front_op_fail):
+    case REG(stencil_front_op_zfail):
+    case REG(stencil_front_op_zpass):
+
+    case REG(stencil_back_op_fail):
+    case REG(stencil_back_op_zfail):
+    case REG(stencil_back_op_zpass): {
+        const auto arg = *(Regs::StencilOp*)(&entry.arg);
+        switch (arg) {
+        case Regs::StencilOp::Keep:
+        case Regs::StencilOp::KeepOGL:
+            return "Keep";
+        case Regs::StencilOp::Zero:
+        case Regs::StencilOp::ZeroOGL:
+            return "Zero";
+        case Regs::StencilOp::Replace:
+        case Regs::StencilOp::ReplaceOGL:
+            return "Replace";
+        case Regs::StencilOp::Incr:
+        case Regs::StencilOp::IncrOGL:
+            return "Incr";
+        case Regs::StencilOp::Decr:
+        case Regs::StencilOp::DecrOGL:
+            return "Decr";
+        case Regs::StencilOp::Invert:
+        case Regs::StencilOp::InvertOGL:
+            return "Invert";
+        case Regs::StencilOp::IncrWrap:
+        case Regs::StencilOp::IncrWrapOGL:
+            return "IncrWrap";
+        case Regs::StencilOp::DecrWrap:
+        case Regs::StencilOp::DecrWrapOGL:
+            return "DecrWrap";
+        }
+        break;
+    }
+
+    case REG(frag_color_clamp):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+
+    case REG(screen_y_control): {
+        switch (i) {
+        case 0:
+            return fmt::format("{}", static_cast<bool>(entry.arg & 1));
+        case 1:
+            return fmt::format("{}", static_cast<bool>((entry.arg >> 4) & 1));
+        }
+        break;
+    }
+
+    case REG(line_width_smooth):
+    case REG(line_width_aliased):
+        return fmt::format("{:.02f}f", *(f32*)(&entry.arg));
+
+    case REG(clip_distance_enabled):
+    case REG(samplecnt_enable):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+
+    case REG(point_size):
+        return fmt::format("{:.02f}f", *(f32*)(&entry.arg));
+    case REG(point_sprite_enable):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+
+    case REG(counter_reset): {
+        const auto arg = *(Regs::CounterReset*)(&entry.arg);
+        switch (arg) {
+        case Regs::CounterReset::SampleCnt:
+            return "SampleCnt";
+        case Regs::CounterReset::Unk02:
+            return "Unk02";
+        case Regs::CounterReset::Unk03:
+            return "Unk03";
+        case Regs::CounterReset::Unk04:
+            return "Unk04";
+        case Regs::CounterReset::EmittedPrimitives:
+            return "EmittedPrimitives";
+        case Regs::CounterReset::Unk11:
+            return "Unk11";
+        case Regs::CounterReset::Unk12:
+            return "Unk12";
+        case Regs::CounterReset::Unk13:
+            return "Unk13";
+        case Regs::CounterReset::Unk15:
+            return "Unk15";
+        case Regs::CounterReset::Unk16:
+            return "Unk16";
+        case Regs::CounterReset::Unk17:
+            return "Unk17";
+        case Regs::CounterReset::Unk18:
+            return "Unk18";
+        case Regs::CounterReset::Unk1A:
+            return "Unk1A";
+        case Regs::CounterReset::Unk1B:
+            return "Unk1B";
+        case Regs::CounterReset::Unk1C:
+            return "Unk1C";
+        case Regs::CounterReset::Unk1D:
+            return "Unk1D";
+        case Regs::CounterReset::Unk1E:
+            return "Unk1E";
+        case Regs::CounterReset::GeneratedPrimitives:
+            return "GeneratedPrimitives";
+        }
+        break;
+    }
+
+    case REG(multisample_enable):
+    case REG(zeta_enable):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+
+    case REG(multisample_control): {
+        switch (i) {
+        case 0:
+            return fmt::format("{}", static_cast<bool>(entry.arg & 1));
+        case 1:
+            return fmt::format("{}", static_cast<bool>((entry.arg >> 4) & 1));
+        }
+        break;
+    }
+
+    case REG(condition.mode): {
+        const auto arg = *(Regs::ConditionMode*)(&entry.arg);
+        switch (arg) {
+        case Regs::ConditionMode::Never:
+            return "Never";
+        case Regs::ConditionMode::Always:
+            return "Always";
+        case Regs::ConditionMode::ResNonZero:
+            return "ResNonZero";
+        case Regs::ConditionMode::Equal:
+            return "Equal";
+        case Regs::ConditionMode::NotEqual:
+            return "NotEqual";
+        }
+        break;
+    }
+
+    case REG(polygon_offset_factor):
+    case REG(polygon_offset_units):
+    case REG(polygon_offset_clamp):
+        return fmt::format("{:.02f}f", *(f32*)(&entry.arg));
+
+    case REG(line_smooth_enable):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+
+    case REG(stencil_two_side_enable):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+
+    case REG(framebuffer_srgb):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+
+    case REG(multisample_mode): {
+        const auto arg = *(Tegra::Texture::MsaaMode*)(&entry.arg);
+        switch (arg) {
+        case Tegra::Texture::MsaaMode::Msaa1x1:
+            return "Msaa1x1";
+        case Tegra::Texture::MsaaMode::Msaa2x1:
+            return "Msaa2x1";
+        case Tegra::Texture::MsaaMode::Msaa2x2:
+            return "Msaa2x2";
+        case Tegra::Texture::MsaaMode::Msaa4x2:
+            return "Msaa4x2";
+        case Tegra::Texture::MsaaMode::Msaa4x2_D3D:
+            return "Msaa4x2_D3D";
+        case Tegra::Texture::MsaaMode::Msaa2x1_D3D:
+            return "Msaa2x1_D3D";
+        case Tegra::Texture::MsaaMode::Msaa4x4:
+            return "Msaa4x4";
+        case Tegra::Texture::MsaaMode::Msaa2x2_VC4:
+            return "Msaa2x2_VC4";
+        case Tegra::Texture::MsaaMode::Msaa2x2_VC12:
+            return "Msaa2x2_VC12";
+        case Tegra::Texture::MsaaMode::Msaa4x2_VC8:
+            return "Msaa4x2_VC8";
+        case Tegra::Texture::MsaaMode::Msaa4x2_VC24:
+            return "Msaa4x2_VC24";
+        }
+        break;
+    }
+
+    case REG(point_coord_replace): {
+        switch (i) {
+        case 0:
+            return (entry.arg >> 2) & 1 ? "UpperLeft" : "LowerLeft";
+        case 1:
+            return fmt::format("0x{:X}", (entry.arg >> 3) & 0x3FF);
+        }
+        break;
+    }
+
+    case REG(draw.vertex_begin_gl): {
+        switch (i) {
+        case 0:
+            return fmt::format("0x{:X}", entry.arg);
+        case 1: {
+            const auto arg = *(Regs::PrimitiveTopology*)(&entry.arg);
+            switch (arg) {
+            case Regs::PrimitiveTopology::Points:
+                return "Points";
+            case Regs::PrimitiveTopology::Lines:
+                return "Lines";
+            case Regs::PrimitiveTopology::LineLoop:
+                return "LineLoop";
+            case Regs::PrimitiveTopology::LineStrip:
+                return "LineStrip";
+            case Regs::PrimitiveTopology::Triangles:
+                return "Triangles";
+            case Regs::PrimitiveTopology::TriangleStrip:
+                return "TriangleStrip";
+            case Regs::PrimitiveTopology::TriangleFan:
+                return "TriangleFan";
+            case Regs::PrimitiveTopology::Quads:
+                return "Quads";
+            case Regs::PrimitiveTopology::QuadStrip:
+                return "QuadStrip";
+            case Regs::PrimitiveTopology::Polygon:
+                return "Polygon";
+            case Regs::PrimitiveTopology::LinesAdjacency:
+                return "LinesAdjacency";
+            case Regs::PrimitiveTopology::LineStripAdjacency:
+                return "LineStripAdjacency";
+            case Regs::PrimitiveTopology::TrianglesAdjacency:
+                return "TrianglesAdjacency";
+            case Regs::PrimitiveTopology::TriangleStripAdjacency:
+                return "TriangleStripAdjacency";
+            case Regs::PrimitiveTopology::Patches:
+                return "Patches";
+            }
+            break;
+        }
+        case 2:
+            return fmt::format("{}", (entry.arg >> 26) & 1);
+        case 3:
+            return fmt::format("{}", (entry.arg >> 27) & 1);
+        }
+        break;
+    }
+
+    case REG(primitive_restart.enabled):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+    case REG(primitive_restart.index):
+        return fmt::format("{}", entry.arg);
+
+    case REG(index_array.format): {
+        const auto arg = *(Regs::IndexFormat*)(&entry.arg);
+        switch (arg) {
+        case Regs::IndexFormat::UnsignedByte:
+            return "UnsignedByte";
+        case Regs::IndexFormat::UnsignedShort:
+            return "UnsignedShort";
+        case Regs::IndexFormat::UnsignedInt:
+            return "UnsignedInt";
+        }
+        break;
+    }
+
+    case REG(index_array.first):
+    case REG(index_array.count):
+        return fmt::format("{}", entry.arg);
+
+    case REG(instanced_arrays.is_instanced):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+
+    case REG(vp_point_size): {
+        switch (i) {
+        case 0:
+            return fmt::format("{}", static_cast<bool>(entry.arg & 1));
+        case 1:
+            return fmt::format("{}", static_cast<bool>((entry.arg >> 4) & 0xFF));
+        }
+        break;
+    }
+
+    case REG(cull_test_enabled):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+
+    case REG(front_face): {
+        const auto arg = *(Regs::FrontFace*)(&entry.arg);
+        switch (arg) {
+        case Regs::FrontFace::ClockWise:
+            return "ClockWise";
+        case Regs::FrontFace::CounterClockWise:
+            return "CounterClockWise";
+        }
+        break;
+    }
+    case REG(cull_face): {
+        const auto arg = *(Regs::CullFace*)(&entry.arg);
+        switch (arg) {
+        case Regs::CullFace::Front:
+            return "Front";
+        case Regs::CullFace::Back:
+            return "Back";
+        case Regs::CullFace::FrontAndBack:
+            return "FrontAndBack";
+        }
+        break;
+    }
+
+    case REG(pixel_center_integer):
+        return fmt::format("{}", entry.arg);
+
+    case REG(viewport_transform_enabled):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+
+    case REG(view_volume_clip_control): {
+        switch (i) {
+        case 0:
+            return fmt::format("{}", static_cast<bool>(entry.arg & 1));
+        case 1:
+            return fmt::format("{}", static_cast<bool>((entry.arg >> 3) & 1));
+        case 2:
+            return fmt::format("{}", static_cast<bool>((entry.arg >> 4) & 1));
+        case 3:
+            return fmt::format("{}", static_cast<bool>((entry.arg >> 11) & 1));
+        }
+        break;
+    }
+
+    case REG(depth_bounds_enable):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+
+    case REG(logic_op.enable):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+    case REG(logic_op.operation): {
+        const auto arg = *(Regs::LogicOperation*)(&entry.arg);
+        switch (arg) {
+        case Regs::LogicOperation::Clear:
+            return "Clear";
+        case Regs::LogicOperation::And:
+            return "And";
+        case Regs::LogicOperation::AndReverse:
+            return "AndReverse";
+        case Regs::LogicOperation::Copy:
+            return "Copy";
+        case Regs::LogicOperation::AndInverted:
+            return "AndInverted";
+        case Regs::LogicOperation::NoOp:
+            return "NoOp";
+        case Regs::LogicOperation::Xor:
+            return "Xor";
+        case Regs::LogicOperation::Or:
+            return "Or";
+        case Regs::LogicOperation::Nor:
+            return "Nor";
+        case Regs::LogicOperation::Equiv:
+            return "Equiv";
+        case Regs::LogicOperation::Invert:
+            return "Invert";
+        case Regs::LogicOperation::OrReverse:
+            return "OrReverse";
+        case Regs::LogicOperation::CopyInverted:
+            return "CopyInverted";
+        case Regs::LogicOperation::OrInverted:
+            return "OrInverted";
+        case Regs::LogicOperation::Nand:
+            return "Nand";
+        case Regs::LogicOperation::Set:
+            return "Set";
+        }
+        break;
+    }
+    case REG(clear_buffers): {
+        switch (i) {
+        case 0:
+            return fmt::format("0x{:X}", entry.arg);
+        case 1:
+            return fmt::format("{}", static_cast<bool>(entry.arg & 1));
+        case 2:
+            return fmt::format("{}", static_cast<bool>((entry.arg >> 1) & 1));
+        case 3:
+            return fmt::format("{}", static_cast<bool>((entry.arg >> 2) & 1));
+        case 4:
+            return fmt::format("{}", static_cast<bool>((entry.arg >> 3) & 1));
+        case 5:
+            return fmt::format("{}", static_cast<bool>((entry.arg >> 4) & 1));
+        case 6:
+            return fmt::format("{}", static_cast<bool>((entry.arg >> 5) & 1));
+        case 7:
+            return fmt::format("{}", static_cast<bool>((entry.arg >> 6) & 0xF));
+        case 8:
+            return fmt::format("0x{:X}", (entry.arg >> 10) & 0x7FF);
+        }
+        break;
+    }
+
+    case REG(color_mask): {
+        switch (i) {
+        case 0:
+            return fmt::format("0x{:X}", entry.arg);
+        case 1:
+            return fmt::format("0x{:X}", entry.arg & 0xF);
+        case 2:
+            return fmt::format("0x{:X}", (entry.arg >> 4) & 0xF);
+        case 3:
+            return fmt::format("0x{:X}", (entry.arg >> 8) & 0xF);
+        case 4:
+            return fmt::format("0x{:X}", (entry.arg >> 12) & 0xF);
+        }
+        break;
+    }
+
+    case REG(query.query_get): {
+        switch (i) {
+        case 0:
+            return fmt::format("0x{:X}", entry.arg);
+        case 1: {
+            u32 temp = entry.arg & 0x3;
+            const auto arg = *(Regs::QueryOperation*)(&temp);
+            switch (arg) {
+            case Regs::QueryOperation::Release:
+                return "Release";
+            case Regs::QueryOperation::Acquire:
+                return "Acquire";
+            case Regs::QueryOperation::Counter:
+                return "Counter";
+            case Regs::QueryOperation::Trap:
+                return "Trap";
+            }
+            break;
+        }
+        case 2:
+            return fmt::format("{}", static_cast<bool>((entry.arg >> 4) & 1));
+        case 3: {
+            u32 temp = (entry.arg >> 12) & 0xF;
+            const auto arg = *(Regs::QueryUnit*)(&temp);
+            switch (arg) {
+            case Regs::QueryUnit::VFetch:
+                return "VFetch";
+            case Regs::QueryUnit::VP:
+                return "VP";
+            case Regs::QueryUnit::Rast:
+                return "Rast";
+            case Regs::QueryUnit::StrmOut:
+                return "StrmOut";
+            case Regs::QueryUnit::GP:
+                return "GP";
+            case Regs::QueryUnit::ZCull:
+                return "ZCull";
+            case Regs::QueryUnit::Prop:
+                return "Prop";
+            case Regs::QueryUnit::Crop:
+                return "Crop";
+            }
+            break;
+        }
+        case 4: {
+            u32 temp = (entry.arg >> 16) & 1;
+            const auto arg = *(Regs::QuerySyncCondition*)(&temp);
+            switch (arg) {
+            case Regs::QuerySyncCondition::NotEqual:
+                return "NotEqual";
+            case Regs::QuerySyncCondition::GreaterThan:
+                return "GreaterThan";
+            }
+            break;
+        }
+        case 5: {
+            u32 temp = (entry.arg >> 23) & 0x1F;
+            const auto arg = *(Regs::QuerySelect*)(&temp);
+            switch (arg) {
+            case Regs::QuerySelect::Zero:
+                return "Zero";
+            case Regs::QuerySelect::TimeElapsed:
+                return "TimeElapsed";
+            case Regs::QuerySelect::TransformFeedbackPrimitivesGenerated:
+                return "TransformFeedbackPrimitivesGenerated";
+            case Regs::QuerySelect::PrimitivesGenerated:
+                return "PrimitivesGenerated";
+            case Regs::QuerySelect::SamplesPassed:
+                return "SamplesPassed";
+            case Regs::QuerySelect::TransformFeedbackUnknown:
+                return "TransformFeedbackUnknown";
+            }
+            break;
+        }
+        case 6:
+            return fmt::format("{}", static_cast<bool>((entry.arg >> 28) & 1));
+        }
+        break;
+    }
+
+    case REG(vertex_array) + REG(vertex_array[0].stride): {
+        switch (i) {
+        case 0:
+            return fmt::format("{}", entry.arg & 0xFFF);
+        case 1:
+            return fmt::format("{}", static_cast<bool>((entry.arg >> 12) & 1));
+        }
+        break;
+    }
+    case REG(vertex_array) + REG(vertex_array[0].divisor):
+        return fmt::format("{}", entry.arg);
+
+    case REG(shader_config) + REG(shader_config[0].enable): {
+        switch (i) {
+        case 0:
+            return fmt::format("{}", static_cast<bool>(entry.arg & 1));
+        case 1: {
+            u32 temp = (entry.arg >> 4) & 0xF;
+            const auto arg = *(Regs::ShaderProgram*)(&temp);
+            switch (arg) {
+            case Regs::ShaderProgram::VertexA:
+                return "VertexA";
+            case Regs::ShaderProgram::VertexB:
+                return "VertexB";
+            case Regs::ShaderProgram::TesselationControl:
+                return "TesselationControl";
+            case Regs::ShaderProgram::TesselationEval:
+                return "TesselationEval";
+            case Regs::ShaderProgram::Geometry:
+                return "Geometry";
+            case Regs::ShaderProgram::Fragment:
+                return "Fragment";
+            }
+            break;
+        }
+        }
+        break;
+    }
+
+    case REG(cb_bind) + REG(cb_bind[0].raw_config): {
+        switch (i) {
+        case 0:
+            return fmt::format("0x{:X}", entry.arg);
+        case 1:
+            return fmt::format("{}", static_cast<bool>(entry.arg & 1));
+        case 2:
+            return fmt::format("{}", (entry.arg >> 4) & 0x1F);
+        }
+        break;
+    }
+
+    case REG(tex_cb_index):
+        return fmt::format("{}", entry.arg);
+    }
+
     return fmt::format("0x{:X}", entry.arg);
 }
 
@@ -378,7 +1409,8 @@ std::string Record::GetMaxwellDMAArg(GPU::RecordEntry& entry, REG_LIST::const_it
         {0x03D6, 0x01, 0x01, 0x03D6, 0x01, 0x01, "stencil_back_mask"},
         {0x03D7, 0x01, 0x01, 0x03D7, 0x01, 0x01, "stencil_back_func_mask"},
         {0x03D8, 0x05, 0x01, 0x03D8, 0x01, 0x01, "unk_03D8(OFFSET)"},
-        {0x03DD, 0x01, 0x01, 0x03DD, 0x01, 0x01, "invalidate_texture_data_cache"},
+        {0x03DD, 0x01, 0x01, 0x03DD, 0x01, 0x01, "invalidate_texture_data_cache.lines"},
+        {0x03DD, 0x01, 0x01, 0x03DD, 0x01, 0x01, "invalidate_texture_data_cache.tag"},
         {0x03DE, 0x01, 0x01, 0x03DE, 0x01, 0x01, "unk_03DE(OFFSET)"},
         {0x03DF, 0x01, 0x01, 0x03DF, 0x01, 0x01, "tiled_cache_barrier"},
         {0x03E0, 0x04, 0x01, 0x03E0, 0x01, 0x01, "unk_03E0(OFFSET)"},
@@ -489,8 +1521,10 @@ std::string Record::GetMaxwellDMAArg(GPU::RecordEntry& entry, REG_LIST::const_it
         {0x04EC, 0x01, 0x01, 0x04EC, 0x01, 0x01, "line_width_smooth"},
         {0x04ED, 0x01, 0x01, 0x04ED, 0x01, 0x01, "line_width_aliased"},
         {0x04EE, 0x1B, 0x01, 0x04EE, 0x01, 0x01, "unk_04EE(OFFSET)"},
-        {0x0509, 0x01, 0x01, 0x0509, 0x01, 0x01, "invalidate_sampler_cache_no_wfi"},
-        {0x050A, 0x01, 0x01, 0x050A, 0x01, 0x01, "invalidate_texture_header_cache_no_wfi"},
+        {0x0509, 0x01, 0x01, 0x0509, 0x01, 0x01, "invalidate_sampler_cache_no_wfi.lines"},
+        {0x0509, 0x01, 0x01, 0x0509, 0x01, 0x01, "invalidate_sampler_cache_no_wfi.tag"},
+        {0x050A, 0x01, 0x01, 0x050A, 0x01, 0x01, "invalidate_texture_header_cache_no_wfi.lines"},
+        {0x050A, 0x01, 0x01, 0x050A, 0x01, 0x01, "invalidate_texture_header_cache_no_wfi.tag"},
         {0x050B, 0x02, 0x01, 0x050B, 0x01, 0x01, "unk_050B(OFFSET)"},
         {0x050D, 0x01, 0x01, 0x050D, 0x01, 0x01, "vb_element_base"},
         {0x050E, 0x01, 0x01, 0x050E, 0x01, 0x01, "vb_base_instance"},
@@ -586,6 +1620,7 @@ std::string Record::GetMaxwellDMAArg(GPU::RecordEntry& entry, REG_LIST::const_it
         {0x0674, 0x01, 0x01, 0x0674, 0x01, 0x01, "clear_buffers.RT"},
         {0x0674, 0x01, 0x01, 0x0674, 0x01, 0x01, "clear_buffers.layer"},
         {0x0675, 0x0B, 0x01, 0x0675, 0x01, 0x01, "unk_0675(OFFSET)"},
+        {0x0680, 0x01, 0x01, 0x0680, 0x08, 0x01, "color_mask(OFFSET).raw"},
         {0x0680, 0x01, 0x01, 0x0680, 0x08, 0x01, "color_mask(OFFSET).R"},
         {0x0680, 0x01, 0x01, 0x0680, 0x08, 0x01, "color_mask(OFFSET).G"},
         {0x0680, 0x01, 0x01, 0x0680, 0x08, 0x01, "color_mask(OFFSET).B"},
@@ -725,7 +1760,6 @@ std::optional<std::tuple<REG_LIST::const_iterator, size_t, size_t>> FindMethod(
     return std::nullopt;
 }
 
-#pragma optimize("", off)
 std::vector<std::string> Record::GetMethodNames(GPU::RecordEntry& entry,
                                                 REG_LIST::const_iterator start_it,
                                                 size_t struct_idx, size_t element_idx) {

@@ -255,7 +255,8 @@ void Maxwell3D::CallMethod(u32 method, u32 method_argument, bool is_last_call) {
         std::scoped_lock lock{gpu.record_mutex};
         if (gpu.CURRENTLY_RECORDING) {
             gpu.METHODS_CALLED.emplace_back(EngineID::MAXWELL_B, method, method_argument,
-                                            std::chrono::high_resolution_clock::now(), gpu.RECORD_DRAW);
+                                            std::chrono::high_resolution_clock::now(),
+                                            gpu.RECORD_DRAW);
         }
     }
 
@@ -371,7 +372,6 @@ void Maxwell3D::CallMethodFromMME(u32 method, u32 method_argument) {
     }
 }
 
-__declspec(noinline)
 void Maxwell3D::FlushMMEInlineDraw() {
     LOG_TRACE(HW_GPU, "called, topology={}, count={}", regs.draw.topology.Value(),
               regs.vertex_buffer.count);
@@ -384,13 +384,6 @@ void Maxwell3D::FlushMMEInlineDraw() {
 
     const bool is_indexed = mme_draw.current_mode == MMEDrawMode::Indexed;
     if (ShouldExecute()) {
-        if constexpr (Tegra::Record::RECORD_ENGINE[Tegra::Record::GetEngineIndex(
-                          EngineID::MAXWELL_B)]) {
-            auto& gpu = system.GetInstance().GPU();
-            if (gpu.CURRENTLY_RECORDING) {
-                gpu.RECORD_DRAW++;
-            }
-        }
         rasterizer->Draw(is_indexed, true);
     }
 
@@ -398,13 +391,6 @@ void Maxwell3D::FlushMMEInlineDraw() {
     // the game is trying to draw indexed or direct mode. This needs to be verified on HW still -
     // it's possible that it is incorrect and that there is some other register used to specify the
     // drawing mode.
-    if constexpr (Tegra::Record::RECORD_ENGINE[Tegra::Record::GetEngineIndex(
-                      EngineID::MAXWELL_B)]) {
-        auto& gpu = system.GetInstance().GPU();
-        if (gpu.CURRENTLY_RECORDING) {
-            LOG_INFO(HW_Memory, "is_indexed {}", is_indexed);
-        }
-    }
     if (is_indexed) {
         regs.index_array.count = 0;
     } else {
@@ -565,13 +551,6 @@ void Maxwell3D::DrawArrays() {
 
     const bool is_indexed{regs.index_array.count && !regs.vertex_buffer.count};
     if (ShouldExecute()) {
-        if constexpr (Tegra::Record::RECORD_ENGINE[Tegra::Record::GetEngineIndex(
-                          EngineID::MAXWELL_B)]) {
-            auto& gpu = system.GetInstance().GPU();
-            if (gpu.CURRENTLY_RECORDING) {
-                gpu.RECORD_DRAW++;
-            }
-        }
         rasterizer->Draw(is_indexed, false);
     }
 

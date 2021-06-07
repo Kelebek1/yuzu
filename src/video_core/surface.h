@@ -462,4 +462,6 @@ bool IsPixelFormatSRGB(PixelFormat format);
 
 std::pair<u32, u32> GetASTCBlockSize(PixelFormat format);
 
+std::string GetPixelFormatName(PixelFormat format);
+
 } // namespace VideoCore::Surface

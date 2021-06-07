@@ -34,6 +34,7 @@
 #include "video_core/renderer_opengl/renderer_opengl.h"
 #include "video_core/shader_cache.h"
 #include "video_core/texture_cache/texture_cache.h"
+#include "video_core/record.h"
 
 namespace OpenGL {
 
@@ -427,6 +428,13 @@ void RasterizerOpenGL::Clear() {
 
 void RasterizerOpenGL::Draw(bool is_indexed, bool is_instanced) {
     MICROPROFILE_SCOPE(OpenGL_Drawing);
+
+    if constexpr (Tegra::Record::RECORD_ENGINE[Tegra::Record::GetEngineIndex(
+                      Tegra::EngineID::MAXWELL_B)]) {
+        if (gpu.CURRENTLY_RECORDING) {
+            gpu.RECORD_DRAW++;
+        }
+    }
 
     query_cache.UpdateCounters();
 
