@@ -343,17 +343,31 @@ public:
     void FlushAndInvalidateRegion(VAddr addr, u64 size);
 
     struct RecordEntry {
-        EngineID engine;
+        const EngineID engine;
+        const u32 method;
+        const u32 arg;
+        const std::chrono::time_point<std::chrono::high_resolution_clock> timestamp;
+        const u32 draw;
+    };
+    struct DrawResult {
         u32 method;
-        u32 arg;
-        std::chrono::time_point<std::chrono::high_resolution_clock> timestamp;
+        std::string engineName;
+        std::vector<std::pair<std::string, std::string>> args;
+        std::chrono::microseconds time;
         u32 draw;
     };
     std::atomic<bool> CURRENTLY_RECORDING = false;
     std::atomic<u32> RECORD_DRAW = 0;
+    std::unordered_map<u32, RecordEntry> RECORD_OLD_REGS;
     std::chrono::time_point<std::chrono::high_resolution_clock> RECORD_TIME_ORIGIN;
     std::vector<RecordEntry> METHODS_CALLED;
     std::mutex record_mutex;
+    /// Draw results, made up of each method, and each argument for each method (unions have each
+    /// member)
+    std::vector<DrawResult> RECORD_RESULTS_CHANGED;
+    /// Draw state unmodified by this frame, contains each method, and each argument for each method
+    /// (unions have each member)
+    std::vector<DrawResult> RECORD_RESULTS_UNCHANGED;
 
 protected:
     void TriggerCpuInterrupt(u32 syncpoint_id, u32 value) const;

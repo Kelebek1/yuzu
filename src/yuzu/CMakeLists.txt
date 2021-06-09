@@ -52,6 +52,9 @@ add_executable(yuzu
     configuration/configure_debug_controller.cpp
     configuration/configure_debug_controller.h
     configuration/configure_debug_controller.ui
+    configuration/configure_debug_record.cpp
+    configuration/configure_debug_record.h
+    configuration/configure_debug_record.ui
     configuration/configure_dialog.cpp
     configuration/configure_dialog.h
     configuration/configure_filesystem.cpp

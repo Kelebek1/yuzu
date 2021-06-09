@@ -25,6 +25,7 @@
 #include "video_core/engines/maxwell_3d.h"
 #include "video_core/engines/shader_type.h"
 #include "video_core/memory_manager.h"
+#include "video_core/record.h"
 #include "video_core/renderer_opengl/gl_device.h"
 #include "video_core/renderer_opengl/gl_query_cache.h"
 #include "video_core/renderer_opengl/gl_rasterizer.h"
@@ -34,7 +35,6 @@
 #include "video_core/renderer_opengl/renderer_opengl.h"
 #include "video_core/shader_cache.h"
 #include "video_core/texture_cache/texture_cache.h"
-#include "video_core/record.h"
 
 namespace OpenGL {
 
@@ -363,6 +363,17 @@ void RasterizerOpenGL::Clear() {
         return;
     }
 
+    if constexpr (Tegra::Record::RECORD_ENGINE[Tegra::Record::GetEngineIndex(
+                      Tegra::EngineID::MAXWELL_B)]) {
+        if (gpu.RECORD_DRAW == 0) {
+            const std::string msg{fmt::format("Draw {}", gpu.RECORD_DRAW)};
+            glDebugMessageInsert(GL_DEBUG_SOURCE_APPLICATION, GL_DEBUG_TYPE_MARKER,
+                                 static_cast<GLuint>(gpu.RECORD_DRAW),
+                                 GL_DEBUG_SEVERITY_NOTIFICATION, static_cast<GLsizei>(msg.size()),
+                                 msg.c_str());
+        }
+    }
+
     const auto& regs = maxwell3d.regs;
     bool use_color{};
     bool use_depth{};
@@ -429,13 +440,6 @@ void RasterizerOpenGL::Clear() {
 void RasterizerOpenGL::Draw(bool is_indexed, bool is_instanced) {
     MICROPROFILE_SCOPE(OpenGL_Drawing);
 
-    if constexpr (Tegra::Record::RECORD_ENGINE[Tegra::Record::GetEngineIndex(
-                      Tegra::EngineID::MAXWELL_B)]) {
-        if (gpu.CURRENTLY_RECORDING) {
-            gpu.RECORD_DRAW++;
-        }
-    }
-
     query_cache.UpdateCounters();
 
     SyncState();
@@ -494,6 +498,15 @@ void RasterizerOpenGL::Draw(bool is_indexed, bool is_instanced) {
     ++num_queued_commands;
 
     gpu.TickWork();
+
+    if constexpr (Tegra::Record::RECORD_ENGINE[Tegra::Record::GetEngineIndex(
+                      Tegra::EngineID::MAXWELL_B)]) {
+        gpu.RECORD_DRAW++;
+        const std::string msg{fmt::format("Draw {}", gpu.RECORD_DRAW)};
+        glDebugMessageInsert(GL_DEBUG_SOURCE_APPLICATION, GL_DEBUG_TYPE_MARKER,
+                             static_cast<GLuint>(gpu.RECORD_DRAW), GL_DEBUG_SEVERITY_NOTIFICATION,
+                             static_cast<GLsizei>(msg.size()), msg.c_str());
+    }
 }
 
 void RasterizerOpenGL::DispatchCompute(GPUVAddr code_addr) {

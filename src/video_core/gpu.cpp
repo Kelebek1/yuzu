@@ -512,15 +512,24 @@ void GPU::SwapBuffers(const Tegra::FramebufferConfig* framebuffer) {
     if constexpr (Tegra::Record::DO_RECORD) {
         std::scoped_lock lock{record_mutex};
         if (CURRENTLY_RECORDING) {
-            Tegra::Record::Print(this, Renderer().GetCurrentFrame());
-            METHODS_CALLED.clear();
+            Record::BuildResults(this, Renderer().GetCurrentFrame());
             CURRENTLY_RECORDING = false;
-            RECORD_DRAW = 0;
+            METHODS_CALLED.clear();
+            RECORD_OLD_REGS.clear();
         } else if (Settings::values.pending_frame_record) {
+            RECORD_RESULTS_CHANGED.clear();
+            RECORD_RESULTS_UNCHANGED.clear();
+            RECORD_OLD_REGS.reserve(maxwell_3d->regs.reg_array.size());
+            const auto fakeTime = std::chrono::high_resolution_clock::now();
+            for (u32 i = 0; i < maxwell_3d->regs.reg_array.size(); ++i) {
+                RecordEntry new_entry{EngineID::MAXWELL_B, i, maxwell_3d->GetRegisterValue(i), fakeTime, 0};
+                RECORD_OLD_REGS.insert({new_entry.method, new_entry});
+            }
             CURRENTLY_RECORDING = true;
             Settings::values.pending_frame_record = false;
             RECORD_TIME_ORIGIN = std::chrono::high_resolution_clock::now();
         }
+        RECORD_DRAW = 0;
     }
     gpu_thread.SwapBuffers(framebuffer);
 }

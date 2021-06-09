@@ -241,7 +241,7 @@ struct Values {
     std::map<u64, std::vector<std::string>> disabled_addons;
 
     // Debug
-    bool pending_frame_record = false;
+    std::atomic<bool> pending_frame_record = false;
 };
 
 extern Values values;

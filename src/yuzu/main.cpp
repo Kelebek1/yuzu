@@ -111,6 +111,7 @@ static FileSys::VirtualFile VfsDirectoryCreateFileWrapper(const FileSys::Virtual
 #include "yuzu/compatibility_list.h"
 #include "yuzu/configuration/config.h"
 #include "yuzu/configuration/configure_dialog.h"
+#include "yuzu/configuration/configure_debug_record.h"
 #include "yuzu/debugger/console.h"
 #include "yuzu/debugger/controller.h"
 #include "yuzu/debugger/profiler.h"
@@ -869,6 +870,9 @@ void GMainWindow::InitializeDebugWidgets() {
     controller_dialog->hide();
     debug_menu->addAction(controller_dialog->toggleViewAction());
 
+    debug_record_registers = new ConfigureDebugRecord();
+    debug_record_registers->hide();
+
     connect(this, &GMainWindow::EmulationStarting, waitTreeWidget,
             &WaitTreeWidget::OnEmulationStarting);
     connect(this, &GMainWindow::EmulationStopping, waitTreeWidget,
@@ -1036,8 +1040,10 @@ void GMainWindow::InitializeHotkeys() {
             });
 
     // Hidden commands
-    connect(hotkey_registry.GetHotkey(main_window, QStringLiteral("Cap Frame Graphic Methods"), this),
-            &QShortcut::activated, this, [] { Settings::values.pending_frame_record = true; });
+    connect(
+        hotkey_registry.GetHotkey(main_window, QStringLiteral("Cap Frame Graphic Methods"), this),
+        &QShortcut::activated, this,
+        [this] { debug_record_registers->setVisible(!debug_record_registers->isVisible()); });
 }
 
 void GMainWindow::SetDefaultUIGeometry() {

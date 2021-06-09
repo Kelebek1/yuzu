@@ -78,11 +78,11 @@ public:
               struct_size{struct_size_}, name{name_} {};
     };
 
-    static void Print(Tegra::GPU* gpu, size_t frame);
+    static void BuildResults(Tegra::GPU* gpu, size_t frame);
 
     [[nodiscard]] static std::vector<std::string> GetMethodNames(
         GPU::RecordEntry& entry, std::array<Method, 400>::const_iterator start_it,
-        size_t struct_idx, size_t element_idx);
+        size_t struct_idx, size_t element_idx, bool is_prev_state);
     [[nodiscard]] static std::string GetArgumentInfo(
         GPU::RecordEntry& entry, std::array<Method, 400>::const_iterator foundMethod, size_t i);
     [[nodiscard]] static std::string GetFermiArg(GPU::RecordEntry& entry,

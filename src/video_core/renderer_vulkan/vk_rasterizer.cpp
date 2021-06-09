@@ -266,13 +266,6 @@ RasterizerVulkan::~RasterizerVulkan() = default;
 void RasterizerVulkan::Draw(bool is_indexed, bool is_instanced) {
     MICROPROFILE_SCOPE(Vulkan_Drawing);
 
-    if constexpr (Tegra::Record::RECORD_ENGINE[Tegra::Record::GetEngineIndex(
-                      Tegra::EngineID::MAXWELL_B)]) {
-        if (gpu.CURRENTLY_RECORDING) {
-            gpu.RECORD_DRAW++;
-        }
-    }
-
     SCOPE_EXIT({ gpu.TickWork(); });
     FlushWork();
 
@@ -326,6 +319,13 @@ void RasterizerVulkan::Draw(bool is_indexed, bool is_instanced) {
     });
 
     EndTransformFeedback();
+
+    if constexpr (Tegra::Record::RECORD_ENGINE[Tegra::Record::GetEngineIndex(
+                      Tegra::EngineID::MAXWELL_B)]) {
+        if (gpu.CURRENTLY_RECORDING) {
+            gpu.RECORD_DRAW++;
+        }
+    }
 }
 
 void RasterizerVulkan::Clear() {

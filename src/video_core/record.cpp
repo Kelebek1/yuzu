@@ -1,9 +1,11 @@
 #include <optional>
+#include <set>
+#include "boost/algorithm/string/classification.hpp"
+#include "boost/algorithm/string/split.hpp"
 #include "record.h"
 #include "surface.h"
 
 namespace Tegra {
-#pragma optimize("", off)
 
 using Maxwell = Tegra::Engines::Maxwell3D;
 using REG_LIST = std::array<Record::Method, 400>;
@@ -12,39 +14,68 @@ using REG_LIST = std::array<Record::Method, 400>;
 std::optional<std::tuple<REG_LIST::const_iterator, size_t, size_t>> FindMethod(
     GPU::RecordEntry& entry);
 
-void Record::Print(Tegra::GPU* gpu, size_t frame) {
-    LOG_INFO(Render_OpenGL, "Methods called for frame {}:", frame);
-    std::string out;
-    out.reserve(0x1000);
+void Record::BuildResults(Tegra::GPU* gpu, size_t frame) {
     u32 lastDraw = -1;
+    std::unordered_set<u32> encountered_methods;
     for (auto& entry : gpu->METHODS_CALLED) {
+        GPU::DrawResult result;
         if (entry.draw != lastDraw) {
-            out += fmt::format("\nDraw {}\n", entry.draw);
+            result.draw = entry.draw;
             lastDraw = entry.draw;
         }
         const auto method = FindMethod(entry);
         if (!method) {
             continue;
         }
+        result.engineName = GetEngineName(entry.engine);
+        encountered_methods.insert(entry.method);
         const auto& [foundMethod, struct_idx, element_idx] = *method;
-        const auto methodNames = GetMethodNames(entry, foundMethod, struct_idx, element_idx);
+        result.method = entry.method;
+        const auto methodNames = GetMethodNames(entry, foundMethod, struct_idx, element_idx, false);
         const auto time = std::chrono::duration_cast<std::chrono::microseconds>(
             entry.timestamp - gpu->RECORD_TIME_ORIGIN);
-        size_t line_width = out.size();
-        out += fmt::format("    {:4} {} (0x{:04X})", time.count(), GetEngineName(entry.engine),
-                           entry.method);
-        line_width = out.size() - line_width;
+        result.time = time;
+
         size_t i = 0;
         for (const auto& name : methodNames) {
             const auto arg = GetArgumentInfo(entry, foundMethod, i);
-            if (i > 0) {
-                out += std::string(line_width, ' ');
-            }
-            out += fmt::format("  {} = {}\n", name, arg);
+            result.args.emplace_back(std::make_pair(name, arg));
             ++i;
         }
+        gpu->RECORD_RESULTS_CHANGED.emplace_back(std::move(result));
     }
-    LOG_INFO(Render_OpenGL, "\n{}", out);
+
+    std::vector<std::string> unchanged_state;
+    for (auto& [_, entry] : gpu->RECORD_OLD_REGS) {
+        if (encountered_methods.contains(entry.method)) {
+            continue;
+        }
+        auto found = FindMethod(entry);
+        if (!found) {
+            continue;
+        }
+        const auto& [foundMethod, struct_idx, element_idx] = *found;
+        auto methodNames = GetMethodNames(entry, foundMethod, struct_idx, element_idx, true);
+        if (methodNames.size() == 0) {
+            continue;
+        }
+
+        GPU::DrawResult result;
+        result.method = entry.method;
+        result.engineName = GetEngineName(entry.engine);
+        result.draw = -1;
+        result.time = std::chrono::microseconds(0);
+        size_t i = 0;
+        for (const auto& name : methodNames) {
+            const auto arg = GetArgumentInfo(entry, foundMethod, i);
+            result.args.emplace_back(std::make_pair(name, arg));
+            ++i;
+        }
+        gpu->RECORD_RESULTS_UNCHANGED.emplace_back(std::move(result));
+    }
+
+    std::sort(gpu->RECORD_RESULTS_UNCHANGED.begin(), gpu->RECORD_RESULTS_UNCHANGED.end(),
+              [](GPU::DrawResult& a, GPU::DrawResult& b) { return a.method < b.method; });
 }
 
 [[nodiscard]] std::string Record::GetArgumentInfo(GPU::RecordEntry& entry,
@@ -73,6 +104,13 @@ std::string Record::GetFermiArg(GPU::RecordEntry& entry, REG_LIST::const_iterato
 std::string Record::GetMaxwellArg(GPU::RecordEntry& entry, REG_LIST::const_iterator method,
                                   size_t i) {
     using Regs = Maxwell::Regs;
+
+    // static bool printed = false;
+    // if (!printed) {
+    //    // LOG_INFO(HW_Memory, "REG(scissor_test) {} REG(scissor_test[0].enable) {}",
+    //    //         REG(scissor_test), REG(scissor_test[0].enable));
+    //    printed = true;
+    //}
 
     switch (method->offset) {
 
@@ -183,6 +221,9 @@ std::string Record::GetMaxwellArg(GPU::RecordEntry& entry, REG_LIST::const_itera
         return fmt::format("{}", entry.arg);
     case REG(rt) + REG(rt[0].format): {
         const auto arg = *(Tegra::RenderTargetFormat*)(&entry.arg);
+        if (arg == Tegra::RenderTargetFormat::NONE) {
+            return "None";
+        }
         const auto format = VideoCore::Surface::PixelFormatFromRenderTargetFormat(arg);
         return fmt::format("{}", VideoCore::Surface::GetPixelFormatName(format));
     }
@@ -222,13 +263,40 @@ std::string Record::GetMaxwellArg(GPU::RecordEntry& entry, REG_LIST::const_itera
         case 0:
             return fmt::format("{:X}", entry.arg);
         case 1:
-            return fmt::format("{}", entry.arg & 0x7);
         case 2:
-            return fmt::format("{}", (entry.arg >> 4) & 0x7);
         case 3:
-            return fmt::format("{}", (entry.arg >> 8) & 0x7);
-        case 4:
-            return fmt::format("{}", (entry.arg >> 12) & 0x7);
+        case 4: {
+            u32 temp;
+            if (i == 1) {
+                temp = entry.arg & 0x7;
+            } else if (i == 2) {
+                temp = (entry.arg >> 4) & 0x7;
+            } else if (i == 3) {
+                temp = (entry.arg >> 8) & 0x7;
+            } else if (i == 4) {
+                temp = (entry.arg >> 12) & 0x7;
+            }
+            const auto arg = *(Regs::ViewportSwizzle*)(&temp);
+            switch (arg) {
+            case Regs::ViewportSwizzle::PositiveX:
+                return "PositiveX";
+            case Regs::ViewportSwizzle::NegativeX:
+                return "NegativeX";
+            case Regs::ViewportSwizzle::PositiveY:
+                return "PositiveY";
+            case Regs::ViewportSwizzle::NegativeY:
+                return "NegativeY";
+            case Regs::ViewportSwizzle::PositiveZ:
+                return "PositiveZ";
+            case Regs::ViewportSwizzle::NegativeZ:
+                return "NegativeZ";
+            case Regs::ViewportSwizzle::PositiveW:
+                return "PositiveW";
+            case Regs::ViewportSwizzle::NegativeW:
+                return "NegativeW";
+            }
+            break;
+        } break;
         }
         break;
     }
@@ -269,6 +337,9 @@ std::string Record::GetMaxwellArg(GPU::RecordEntry& entry, REG_LIST::const_itera
     case REG(clear_color):
     case REG(clear_depth):
         return fmt::format("{:.02f}f", *(f32*)(&entry.arg));
+
+    case REG(clear_stencil):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
 
     case REG(polygon_mode_front):
     case REG(polygon_mode_back): {
@@ -399,13 +470,13 @@ std::string Record::GetMaxwellArg(GPU::RecordEntry& entry, REG_LIST::const_itera
     case REG(clear_flags): {
         switch (i) {
         case 0:
-            return fmt::format("{}", entry.arg & 0xF);
+            return fmt::format("{}", static_cast<bool>(entry.arg & 0xF));
         case 1:
-            return fmt::format("{}", (entry.arg >> 4) & 0xF);
+            return fmt::format("{}", static_cast<bool>((entry.arg >> 4) & 0xF));
         case 2:
-            return fmt::format("{}", (entry.arg >> 8) & 0xF);
+            return fmt::format("{}", static_cast<bool>((entry.arg >> 8) & 0xF));
         case 3:
-            return fmt::format("{}", (entry.arg >> 12) & 0xF);
+            return fmt::format("{}", static_cast<bool>((entry.arg >> 12) & 0xF));
         }
         break;
     }
@@ -427,33 +498,33 @@ std::string Record::GetMaxwellArg(GPU::RecordEntry& entry, REG_LIST::const_itera
             case Regs::VertexAttribute::Size::Invalid:
                 return "Invalid";
             case Regs::VertexAttribute::Size::Size_32_32_32_32:
-                return "Size_32_32_32_32";
+                return "32_32_32_32";
             case Regs::VertexAttribute::Size::Size_32_32_32:
-                return "Size_32_32_32";
+                return "32_32_32";
             case Regs::VertexAttribute::Size::Size_16_16_16_16:
-                return "Size_16_16_16_16";
+                return "16_16_16_16";
             case Regs::VertexAttribute::Size::Size_32_32:
-                return "Size_32_32";
+                return "32_32";
             case Regs::VertexAttribute::Size::Size_16_16_16:
-                return "Size_16_16_16";
+                return "16_16_16";
             case Regs::VertexAttribute::Size::Size_8_8_8_8:
-                return "Size_8_8_8_8";
+                return "8_8_8_8";
             case Regs::VertexAttribute::Size::Size_16_16:
-                return "Size_16_16";
+                return "16_16";
             case Regs::VertexAttribute::Size::Size_32:
-                return "Size_32";
+                return "32";
             case Regs::VertexAttribute::Size::Size_8_8_8:
-                return "Size_8_8_8";
+                return "8_8_8";
             case Regs::VertexAttribute::Size::Size_8_8:
-                return "Size_8_8";
+                return "8_8";
             case Regs::VertexAttribute::Size::Size_16:
-                return "Size_16";
+                return "16";
             case Regs::VertexAttribute::Size::Size_8:
-                return "Size_8";
+                return "8";
             case Regs::VertexAttribute::Size::Size_10_10_10_2:
-                return "Size_10_10_10_2";
+                return "10_10_10_2";
             case Regs::VertexAttribute::Size::Size_11_11_10:
-                return "Size_11_11_10";
+                return "11_11_10";
             }
             break;
         case 4:
@@ -626,13 +697,13 @@ std::string Record::GetMaxwellArg(GPU::RecordEntry& entry, REG_LIST::const_itera
         return fmt::format("{:.02f}f", *(f32*)(&entry.arg));
 
     case REG(blend.separate_alpha):
-    case REG(independent_blend) + REG(independent_blend[0].separate_alpha):
+    case REG(independent_blend[0].separate_alpha):
         return fmt::format("{}", static_cast<bool>(entry.arg));
 
     case REG(blend.equation_rgb):
     case REG(blend.equation_a):
-    case REG(independent_blend) + REG(independent_blend[0].equation_rgb):
-    case REG(independent_blend) + REG(independent_blend[0].equation_a): {
+    case REG(independent_blend[0].equation_rgb):
+    case REG(independent_blend[0].equation_a): {
         const auto arg = *(Regs::Blend::Equation*)(&entry.arg);
         switch (arg) {
         case Regs::Blend::Equation::Add:
@@ -658,10 +729,10 @@ std::string Record::GetMaxwellArg(GPU::RecordEntry& entry, REG_LIST::const_itera
     case REG(blend.factor_dest_rgb):
     case REG(blend.factor_source_a):
     case REG(blend.factor_dest_a):
-    case REG(independent_blend) + REG(independent_blend[0].factor_source_rgb):
-    case REG(independent_blend) + REG(independent_blend[0].factor_dest_rgb):
-    case REG(independent_blend) + REG(independent_blend[0].factor_source_a):
-    case REG(independent_blend) + REG(independent_blend[0].factor_dest_a): {
+    case REG(independent_blend[0].factor_source_rgb):
+    case REG(independent_blend[0].factor_dest_rgb):
+    case REG(independent_blend[0].factor_source_a):
+    case REG(independent_blend[0].factor_dest_a): {
         const auto arg = *(Regs::Blend::Factor*)(&entry.arg);
         switch (arg) {
         case Regs::Blend::Factor::Zero:
@@ -1123,13 +1194,13 @@ std::string Record::GetMaxwellArg(GPU::RecordEntry& entry, REG_LIST::const_itera
         case 0:
             return fmt::format("0x{:X}", entry.arg);
         case 1:
-            return fmt::format("0x{:X}", entry.arg & 0xF);
+            return fmt::format("{}", static_cast<bool>(entry.arg & 0xF));
         case 2:
-            return fmt::format("0x{:X}", (entry.arg >> 4) & 0xF);
+            return fmt::format("{}", static_cast<bool>((entry.arg >> 4) & 0xF));
         case 3:
-            return fmt::format("0x{:X}", (entry.arg >> 8) & 0xF);
+            return fmt::format("{}", static_cast<bool>((entry.arg >> 8) & 0xF));
         case 4:
-            return fmt::format("0x{:X}", (entry.arg >> 12) & 0xF);
+            return fmt::format("{}", static_cast<bool>((entry.arg >> 12) & 0xF));
         }
         break;
     }
@@ -1214,7 +1285,7 @@ std::string Record::GetMaxwellArg(GPU::RecordEntry& entry, REG_LIST::const_itera
         break;
     }
 
-    case REG(vertex_array) + REG(vertex_array[0].stride): {
+    case REG(vertex_array[0].stride): {
         switch (i) {
         case 0:
             return fmt::format("{}", entry.arg & 0xFFF);
@@ -1223,10 +1294,10 @@ std::string Record::GetMaxwellArg(GPU::RecordEntry& entry, REG_LIST::const_itera
         }
         break;
     }
-    case REG(vertex_array) + REG(vertex_array[0].divisor):
+    case REG(vertex_array[0].divisor):
         return fmt::format("{}", entry.arg);
 
-    case REG(shader_config) + REG(shader_config[0].enable): {
+    case REG(shader_config[0].enable): {
         switch (i) {
         case 0:
             return fmt::format("{}", static_cast<bool>(entry.arg & 1));
@@ -1253,7 +1324,7 @@ std::string Record::GetMaxwellArg(GPU::RecordEntry& entry, REG_LIST::const_itera
         break;
     }
 
-    case REG(cb_bind) + REG(cb_bind[0].raw_config): {
+    case REG(cb_bind[0].raw_config): {
         switch (i) {
         case 0:
             return fmt::format("0x{:X}", entry.arg);
@@ -1360,7 +1431,7 @@ std::string Record::GetMaxwellDMAArg(GPU::RecordEntry& entry, REG_LIST::const_it
         {0x0206, 0x01, 0x01, 0x0200, 0x08, 0x10, "rt(OFFSET).volume"},
         {0x0207, 0x01, 0x01, 0x0200, 0x08, 0x10, "rt(OFFSET).layer_stride"},
         {0x0208, 0x01, 0x01, 0x0200, 0x08, 0x10, "rt(OFFSET).base_layer"},
-        {0x0209, 0x07, 0x01, 0x0200, 0x08, 0x10, "rt(OFFSET).unk_0209"},
+        {0x0209, 0x07, 0x01, 0x0200, 0x08, 0x10, "rt(OFFSET).unk_0209(OFFSET)"},
         {0x0280, 0x01, 0x01, 0x0280, 0x10, 0x08, "viewport_transform(OFFSET).scale_x"},
         {0x0281, 0x01, 0x01, 0x0280, 0x10, 0x08, "viewport_transform(OFFSET).scale_y"},
         {0x0282, 0x01, 0x01, 0x0280, 0x10, 0x08, "viewport_transform(OFFSET).scale_z"},
@@ -1502,7 +1573,7 @@ std::string Record::GetMaxwellDMAArg(GPU::RecordEntry& entry, REG_LIST::const_it
         {0x04D2, 0x01, 0x01, 0x04CF, 0x01, 0x11, "blend.factor_dest_rgb"},
         {0x04D3, 0x01, 0x01, 0x04CF, 0x01, 0x11, "blend.equation_a"},
         {0x04D4, 0x01, 0x01, 0x04CF, 0x01, 0x11, "blend.factor_source_a"},
-        {0x04D5, 0x01, 0x01, 0x04CF, 0x01, 0x11, "blend.unk_04D5(OFFSET)"},
+        {0x04D5, 0x01, 0x01, 0x04CF, 0x01, 0x11, "blend.unk_04D5"},
         {0x04D6, 0x01, 0x01, 0x04CF, 0x01, 0x11, "blend.factor_dest_a"},
         {0x04D7, 0x01, 0x01, 0x04CF, 0x01, 0x11, "blend.enable_common"},
         {0x04D8, 0x08, 0x01, 0x04CF, 0x01, 0x11, "blend.enable(OFFSET)"},
@@ -1750,7 +1821,7 @@ std::optional<std::tuple<REG_LIST::const_iterator, size_t, size_t>> FindMethod(
 
             size_t struct_idx = (entry.method - method.struct_base) / method.struct_size;
             size_t element_idx = (base_offset - start_it->offset) / method.elem_size;
-            if (base_offset == start_it->offset) {
+            if (method.struct_count == 0x1 && base_offset == start_it->offset) {
                 element_idx = struct_idx;
             }
             return std::make_optional<std::tuple<REG_LIST::const_iterator, size_t, size_t>>(
@@ -1762,8 +1833,13 @@ std::optional<std::tuple<REG_LIST::const_iterator, size_t, size_t>> FindMethod(
 
 std::vector<std::string> Record::GetMethodNames(GPU::RecordEntry& entry,
                                                 REG_LIST::const_iterator start_it,
-                                                size_t struct_idx, size_t element_idx) {
+                                                size_t struct_idx, size_t element_idx,
+                                                bool is_prev_state) {
     std::vector<std::string> methods_found;
+
+    if (is_prev_state && start_it->name.starts_with("unk")) {
+        return methods_found;
+    }
 
     if (entry.method >= 0xE00) {
         methods_found.emplace_back(
@@ -1798,6 +1874,5 @@ std::vector<std::string> Record::GetMethodNames(GPU::RecordEntry& entry,
     }
     return methods_found;
 }
-#pragma optimize("", on)
 
 } // namespace Tegra

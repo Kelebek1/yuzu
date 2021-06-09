@@ -28,6 +28,7 @@ class LoadingScreen;
 class MicroProfileDialog;
 class ProfilerWidget;
 class ControllerDialog;
+class ConfigureDebugRecord;
 class QLabel;
 class QPushButton;
 class QProgressDialog;
@@ -335,6 +336,7 @@ private:
     MicroProfileDialog* microProfileDialog;
     WaitTreeWidget* waitTreeWidget;
     ControllerDialog* controller_dialog;
+    ConfigureDebugRecord* debug_record_registers;
 
     QAction* actions_recent_files[max_recent_files_item];
 
