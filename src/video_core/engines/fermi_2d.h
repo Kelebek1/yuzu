@@ -13,6 +13,10 @@
 #include "video_core/engines/engine_interface.h"
 #include "video_core/gpu.h"
 
+namespace Core {
+class System;
+}
+
 namespace Tegra {
 class MemoryManager;
 }
@@ -34,7 +38,7 @@ namespace Tegra::Engines {
 
 class Fermi2D final : public EngineInterface {
 public:
-    explicit Fermi2D();
+    explicit Fermi2D(Core::System& system_);
     ~Fermi2D() override;
 
     /// Binds a rasterizer to this engine.
@@ -306,6 +310,8 @@ private:
     /// Performs the copy from the source surface to the destination surface as configured in the
     /// registers.
     void Blit();
+
+    Core::System& system;
 };
 
 #define ASSERT_REG_POSITION(field_name, position)                                                  \

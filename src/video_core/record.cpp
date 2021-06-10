@@ -1,22 +1,29 @@
 #include <optional>
 #include <set>
-#include "boost/algorithm/string/classification.hpp"
-#include "boost/algorithm/string/split.hpp"
 #include "record.h"
 #include "surface.h"
+#include "video_core/renderer_opengl/gl_rasterizer.h"
 
 namespace Tegra {
-
+#pragma optimize("", off)
 using Maxwell = Tegra::Engines::Maxwell3D;
+using Fermi = Tegra::Engines::Fermi2D;
 using REG_LIST = std::array<Record::Method, 400>;
-#define REG(field_name) (offsetof(Maxwell::Regs, field_name) / sizeof(u32))
+
+void Record::OutputMarkerOGL(Tegra::GPU* gpu) {
+    const std::string msg{fmt::format("End of draw {}", gpu->RECORD_DRAW)};
+    glDebugMessageInsert(GL_DEBUG_SOURCE_APPLICATION, GL_DEBUG_TYPE_MARKER,
+                         static_cast<GLuint>(gpu->RECORD_DRAW), GL_DEBUG_SEVERITY_NOTIFICATION,
+                         static_cast<GLsizei>(msg.size()), msg.c_str());
+    gpu->RECORD_DRAW++;
+}
 
 std::optional<std::tuple<REG_LIST::const_iterator, size_t, size_t>> FindMethod(
     GPU::RecordEntry& entry);
 
 void Record::BuildResults(Tegra::GPU* gpu, size_t frame) {
     u32 lastDraw = -1;
-    std::unordered_set<u32> encountered_methods;
+    std::array<std::unordered_set<u32>, 5> encountered_methods;
     for (auto& entry : gpu->METHODS_CALLED) {
         GPU::DrawResult result;
         if (entry.draw != lastDraw) {
@@ -28,7 +35,7 @@ void Record::BuildResults(Tegra::GPU* gpu, size_t frame) {
             continue;
         }
         result.engineName = GetEngineName(entry.engine);
-        encountered_methods.insert(entry.method);
+        encountered_methods[GetEngineIndex(entry.engine)].insert(entry.method);
         const auto& [foundMethod, struct_idx, element_idx] = *method;
         result.method = entry.method;
         const auto methodNames = GetMethodNames(entry, foundMethod, struct_idx, element_idx, false);
@@ -46,32 +53,34 @@ void Record::BuildResults(Tegra::GPU* gpu, size_t frame) {
     }
 
     std::vector<std::string> unchanged_state;
-    for (auto& [_, entry] : gpu->RECORD_OLD_REGS) {
-        if (encountered_methods.contains(entry.method)) {
-            continue;
-        }
-        auto found = FindMethod(entry);
-        if (!found) {
-            continue;
-        }
-        const auto& [foundMethod, struct_idx, element_idx] = *found;
-        auto methodNames = GetMethodNames(entry, foundMethod, struct_idx, element_idx, true);
-        if (methodNames.size() == 0) {
-            continue;
-        }
+    for (auto& engine : gpu->RECORD_OLD_REGS) {
+        for (auto& [_, entry] : engine) {
+            if (encountered_methods[GetEngineIndex(entry.engine)].contains(entry.method)) {
+                continue;
+            }
+            auto found = FindMethod(entry);
+            if (!found) {
+                continue;
+            }
+            const auto& [foundMethod, struct_idx, element_idx] = *found;
+            auto methodNames = GetMethodNames(entry, foundMethod, struct_idx, element_idx, true);
+            if (methodNames.size() == 0) {
+                continue;
+            }
 
-        GPU::DrawResult result;
-        result.method = entry.method;
-        result.engineName = GetEngineName(entry.engine);
-        result.draw = -1;
-        result.time = std::chrono::microseconds(0);
-        size_t i = 0;
-        for (const auto& name : methodNames) {
-            const auto arg = GetArgumentInfo(entry, foundMethod, i);
-            result.args.emplace_back(std::make_pair(name, arg));
-            ++i;
+            GPU::DrawResult result;
+            result.method = entry.method;
+            result.engineName = GetEngineName(entry.engine);
+            result.draw = -1;
+            result.time = std::chrono::microseconds(0);
+            size_t i = 0;
+            for (const auto& name : methodNames) {
+                const auto arg = GetArgumentInfo(entry, foundMethod, i);
+                result.args.emplace_back(std::make_pair(name, arg));
+                ++i;
+            }
+            gpu->RECORD_RESULTS_UNCHANGED.emplace_back(std::move(result));
         }
-        gpu->RECORD_RESULTS_UNCHANGED.emplace_back(std::move(result));
     }
 
     std::sort(gpu->RECORD_RESULTS_UNCHANGED.begin(), gpu->RECORD_RESULTS_UNCHANGED.end(),
@@ -96,11 +105,359 @@ void Record::BuildResults(Tegra::GPU* gpu, size_t frame) {
     return "";
 }
 
+#define REG(field_name) (offsetof(Fermi::Regs, field_name) / sizeof(u32))
 std::string Record::GetFermiArg(GPU::RecordEntry& entry, REG_LIST::const_iterator method,
                                 size_t i) {
-    return "";
-}
+    using Regs = Fermi::Regs;
 
+    switch (method->offset) {
+
+    case REG(notify): {
+        const auto& arg = *(Fermi::NotifyType*)(&entry.arg);
+        switch (arg) {
+        case Fermi::NotifyType::WriteOnly:
+            return "WriteOnly";
+        case Fermi::NotifyType::WriteThenAwaken:
+            return "WriteThenAwaken";
+        }
+        break;
+    }
+
+    case REG(wait_for_idle):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+
+    case REG(dst.format):
+    case REG(src.format): {
+        const auto arg = *(Tegra::RenderTargetFormat*)(&entry.arg);
+        if (arg == Tegra::RenderTargetFormat::NONE) {
+            return "None";
+        }
+        const auto format = VideoCore::Surface::PixelFormatFromRenderTargetFormat(arg);
+        return fmt::format("{}", VideoCore::Surface::GetPixelFormatName(format));
+    }
+    case REG(dst.linear):
+    case REG(src.linear): {
+        const auto& arg = *(Fermi::MemoryLayout*)(&entry.arg);
+        switch (arg) {
+        case Fermi::MemoryLayout::BlockLinear:
+            return "BlockLinear";
+        case Fermi::MemoryLayout::Pitch:
+            return "Pitch";
+        }
+        break;
+    }
+    case REG(dst.block_width):
+    case REG(src.block_width): {
+        switch (i) {
+        case 0:
+            return fmt::format("{}", entry.arg & 0xF);
+        case 1:
+            return fmt::format("{}", (entry.arg >> 4) & 0xF);
+        case 2:
+            return fmt::format("{}", (entry.arg >> 8) & 0xF);
+        }
+        break;
+    }
+    case REG(dst.depth):
+    case REG(dst.layer):
+    case REG(dst.pitch):
+    case REG(dst.width):
+    case REG(dst.height):
+    case REG(src.depth):
+    case REG(src.layer):
+    case REG(src.pitch):
+    case REG(src.width):
+    case REG(src.height):
+        return fmt::format("{}", entry.arg);
+
+    case REG(pixels_from_cpu_index_wrap): {
+        const auto& arg = *(Fermi::CpuIndexWrap*)(&entry.arg);
+        switch (arg) {
+        case Fermi::CpuIndexWrap::Wrap:
+            return "Wrap";
+        case Fermi::CpuIndexWrap::NoWrap:
+            return "NoWrap";
+        }
+        break;
+    }
+
+    case REG(pixels_from_memory_sector_promotion): {
+        const auto& arg = *(Fermi::SectorPromotion*)(&entry.arg);
+        switch (arg) {
+        case Fermi::SectorPromotion::NoPromotion:
+            return "NoPromotion";
+        case Fermi::SectorPromotion::PromoteTo2V:
+            return "PromoteTo2V";
+        case Fermi::SectorPromotion::PromoteTo2H:
+            return "PromoteTo2H";
+        case Fermi::SectorPromotion::PromoteTo4:
+            return "PromoteTo4";
+        }
+        break;
+    }
+
+    case REG(num_tpcs): {
+        const auto& arg = *(Fermi::NumTpcs*)(&entry.arg);
+        switch (arg) {
+        case Fermi::NumTpcs::All:
+            return "All";
+        case Fermi::NumTpcs::One:
+            return "One";
+        }
+        break;
+    }
+
+    case REG(render_enable_mode): {
+        const auto& arg = *(Fermi::RenderEnableMode*)(&entry.arg);
+        switch (arg) {
+        case Fermi::RenderEnableMode::False:
+            return "False";
+        case Fermi::RenderEnableMode::True:
+            return "True";
+        case Fermi::RenderEnableMode::Conditional:
+            return "Conditional";
+        case Fermi::RenderEnableMode::RenderIfEqual:
+            return "RenderIfEqual";
+        case Fermi::RenderEnableMode::RenderIfNotEqual:
+            return "RenderIfNotEqual";
+        }
+        break;
+    }
+
+    case REG(clip_x0):
+    case REG(clip_y0):
+    case REG(clip_width):
+    case REG(clip_height):
+        return fmt::format("{}", entry.arg);
+
+    case REG(clip_enable):
+        return fmt::format("{}", static_cast<bool>(entry.arg & 0x1));
+
+    case REG(color_key_format): {
+        u32 temp = entry.arg & 0x7;
+        const auto& arg = *(Fermi::ColorKeyFormat*)(&temp);
+        switch (arg) {
+        case Fermi::ColorKeyFormat::A16R5G6B5:
+            return "A16R5G6B5";
+        case Fermi::ColorKeyFormat::A1R5G55B5:
+            return "A1R5G55B5";
+        case Fermi::ColorKeyFormat::A8R8G8B8:
+            return "A8R8G8B8";
+        case Fermi::ColorKeyFormat::A2R10G10B10:
+            return "A2R10G10B10";
+        case Fermi::ColorKeyFormat::Y8:
+            return "Y8";
+        case Fermi::ColorKeyFormat::Y16:
+            return "Y16";
+        case Fermi::ColorKeyFormat::Y32:
+            return "Y32";
+        }
+        break;
+    }
+
+    case REG(color_key_enable):
+        return fmt::format("{}", static_cast<bool>(entry.arg & 0x1));
+
+    case REG(rop):
+        return fmt::format("0x{:X}", entry.arg & 0xFF);
+
+    case REG(beta4): {
+        switch (i) {
+        case 0:
+            return fmt::format("0x{:X}", entry.arg & 0xFF);
+        case 1:
+            return fmt::format("0x{:X}", (entry.arg >> 8) & 0xFF);
+        case 2:
+            return fmt::format("0x{:X}", (entry.arg >> 16) & 0xFF);
+        case 3:
+            return fmt::format("0x{:X}", (entry.arg >> 24) & 0xFF);
+        }
+        break;
+    }
+
+    case REG(operation): {
+        const auto& arg = *(Fermi::Operation*)(&entry.arg);
+        switch (arg) {
+        case Fermi::Operation::SrcCopyAnd:
+            return "SrcCopyAnd";
+        case Fermi::Operation::ROPAnd:
+            return "ROPAnd";
+        case Fermi::Operation::Blend:
+            return "Blend";
+        case Fermi::Operation::SrcCopy:
+            return "SrcCopy";
+        case Fermi::Operation::ROP:
+            return "ROP";
+        case Fermi::Operation::SrcCopyPremult:
+            return "SrcCopyPremult";
+        case Fermi::Operation::BlendPremult:
+            return "BlendPremult";
+        }
+        break;
+    }
+
+    case REG(pattern_offset.x): {
+        switch (i) {
+        case 0:
+            return fmt::format("{}", entry.arg & 0x3F);
+        case 1:
+            return fmt::format("{}", (entry.arg >> 6) & 0x3F);
+        }
+    }
+
+    case REG(pattern_select): {
+        u32 temp = entry.arg & 0x3;
+        const auto& arg = *(Fermi::PatternSelect*)(&entry.arg);
+        switch (arg) {
+        case Fermi::PatternSelect::MonoChrome8x8:
+            return "MonoChrome8x8";
+        case Fermi::PatternSelect::MonoChrome64x1:
+            return "MonoChrome64x1";
+        case Fermi::PatternSelect::MonoChrome1x64:
+            return "MonoChrome1x64";
+        case Fermi::PatternSelect::Color:
+            return "Color";
+        }
+        break;
+    }
+
+    case REG(monochrome_pattern.color_format): {
+        u32 temp = entry.arg & 0x7;
+        const auto& arg = *(Fermi::MonochromePatternColorFormat*)(&entry.arg);
+        switch (arg) {
+        case Fermi::MonochromePatternColorFormat::A8X8R5G6B5:
+            return "A8X8R5G6B5";
+        case Fermi::MonochromePatternColorFormat::A1R5G5B5:
+            return "A1R5G5B5";
+        case Fermi::MonochromePatternColorFormat::A8R8G8B8:
+            return "A8R8G8B8";
+        case Fermi::MonochromePatternColorFormat::A8Y8:
+            return "A8Y8";
+        case Fermi::MonochromePatternColorFormat::A8X8Y16:
+            return "A8X8Y16";
+        case Fermi::MonochromePatternColorFormat::Y32:
+            return "Y32";
+        }
+        break;
+    }
+
+    case REG(monochrome_pattern.format): {
+        u32 temp = entry.arg & 0x7;
+        const auto& arg = *(Fermi::MonochromePatternFormat*)(&entry.arg);
+        switch (arg) {
+        case Fermi::MonochromePatternFormat::CGA6_M1:
+            return "CGA6_M1";
+        case Fermi::MonochromePatternFormat::LE_M1:
+            return "LE_M1";
+        }
+        break;
+    }
+
+    case REG(render_solid.prim_point[0].x):
+    case REG(render_solid.prim_point[0].y):
+        return fmt::format("{}", entry.arg);
+
+    case REG(pixels_from_cpu.data_type):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+    case REG(pixels_from_cpu.color_format): {
+        const auto arg = *(Tegra::RenderTargetFormat*)(&entry.arg);
+        // Avoid the function throwing unimplemented errors about 0
+        if (arg == Tegra::RenderTargetFormat::NONE) {
+            return "None";
+        }
+        const auto format = VideoCore::Surface::PixelFormatFromRenderTargetFormat(arg);
+        return fmt::format("{}", VideoCore::Surface::GetPixelFormatName(format));
+    }
+    case REG(pixels_from_cpu.index_format): {
+        switch (entry.arg) {
+        case 0:
+            return "I1";
+        case 1:
+            return "I4";
+        case 2:
+            return "I8";
+        }
+        break;
+    }
+    case REG(pixels_from_cpu.mono_format):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+    case REG(pixels_from_cpu.wrap): {
+        switch (entry.arg) {
+        case 0:
+            return "Packed";
+        case 1:
+            return "AlignByte";
+        case 2:
+            return "AlignWord";
+        }
+        break;
+    }
+    case REG(pixels_from_cpu.mono_opacity):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+
+    case REG(pixels_from_cpu.src_width):
+    case REG(pixels_from_cpu.src_height):
+    case REG(pixels_from_cpu.dx_du_int):
+    case REG(pixels_from_cpu.dy_dv_int):
+    case REG(pixels_from_cpu.dst_x0_int):
+    case REG(pixels_from_cpu.dst_y0_int):
+        return fmt::format("{}", static_cast<s32>(entry.arg));
+    case REG(pixels_from_cpu.dx_du_frac):
+    case REG(pixels_from_cpu.dx_dv_frac):
+    case REG(pixels_from_cpu.dst_x0_frac):
+    case REG(pixels_from_cpu.dst_y0_frac):
+        return fmt::format("{}", (entry.arg >> 12) & 0x7FFFF);
+
+    case REG(pixels_from_memory.block_shape):
+        return fmt::format("0x{:X}", entry.arg & 0x7);
+    case REG(pixels_from_memory.corral_size):
+        return fmt::format("{}", entry.arg & 0x3F);
+    case REG(pixels_from_memory.safe_overlap):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+    case REG(pixels_from_memory.sample_mode): {
+        switch (i) {
+        case 0: {
+            const u32 temp = entry.arg & 1;
+            const auto arg = *(Fermi::Origin*)(&temp);
+            switch (arg) {
+            case Fermi::Origin::Center:
+                return "Center";
+            case Fermi::Origin::Corner:
+                return "Corner";
+            }
+            break;
+        }
+        case 1: {
+            const u32 temp = (entry.arg >> 4) & 1;
+            const auto arg = *(Fermi::Filter*)(&temp);
+            switch (arg) {
+            case Fermi::Filter::Point:
+                return "Point";
+            case Fermi::Filter::Bilinear:
+                return "Bilinear";
+            }
+            break;
+        }
+        }
+        break;
+    }
+    case REG(pixels_from_memory.dst_x0):
+    case REG(pixels_from_memory.dst_y0):
+    case REG(pixels_from_memory.dst_width):
+    case REG(pixels_from_memory.dst_height):
+        return fmt::format("{}", static_cast<s32>(entry.arg));
+    case REG(pixels_from_memory.du_dx):
+    case REG(pixels_from_memory.dv_dy):
+    case REG(pixels_from_memory.src_x0):
+    case REG(pixels_from_memory.src_y0):
+        return fmt::format("{}", static_cast<s64>(entry.arg));
+    }
+
+    return fmt::format("0x{:X}", entry.arg);
+}
+#undef REG
+
+#define REG(field_name) (offsetof(Maxwell::Regs, field_name) / sizeof(u32))
 std::string Record::GetMaxwellArg(GPU::RecordEntry& entry, REG_LIST::const_iterator method,
                                   size_t i) {
     using Regs = Maxwell::Regs;
@@ -1342,6 +1699,7 @@ std::string Record::GetMaxwellArg(GPU::RecordEntry& entry, REG_LIST::const_itera
 
     return fmt::format("0x{:X}", entry.arg);
 }
+#undef REG
 
 std::string Record::GetKeplerComputeArg(GPU::RecordEntry& entry, REG_LIST::const_iterator method,
                                         size_t i) {
@@ -1359,7 +1717,129 @@ std::string Record::GetMaxwellDMAArg(GPU::RecordEntry& entry, REG_LIST::const_it
 }
 
 [[nodiscard]] static constexpr REG_LIST BuildFermiMethods() {
-    return {};
+    return {{
+        {0x0000, 0x01, 0x01, 0x0000, 0x01, 0x01, "object"},
+        {0x0001, 0x3F, 0x01, 0x0001, 0x01, 0x01, "unk_0001(OFFSET)"},
+        {0x0040, 0x01, 0x01, 0x0040, 0x01, 0x01, "no_operation"},
+        {0x0041, 0x01, 0x01, 0x0041, 0x01, 0x01, "notify"},
+        {0x0042, 0x02, 0x01, 0x0042, 0x01, 0x01, "unk_0042(OFFSET)"},
+        {0x0044, 0x01, 0x01, 0x0044, 0x01, 0x01, "wait_for_idle"},
+        {0x0045, 0x0B, 0x01, 0x0045, 0x01, 0x01, "unk_0045(OFFSET)"},
+        {0x0050, 0x01, 0x01, 0x0050, 0x01, 0x01, "pm_trigger"},
+        {0x0051, 0x0F, 0x01, 0x0051, 0x01, 0x01, "unk_0051(OFFSET)"},
+        {0x0060, 0x01, 0x01, 0x0060, 0x01, 0x01, "context_dma_notify"},
+        {0x0061, 0x01, 0x01, 0x0061, 0x01, 0x01, "dst_context_dma"},
+        {0x0062, 0x01, 0x01, 0x0062, 0x01, 0x01, "src_context_dma"},
+        {0x0063, 0x01, 0x01, 0x0063, 0x01, 0x01, "semaphore_context_dma"},
+        {0x0064, 0x1C, 0x01, 0x0064, 0x01, 0x01, "unk_0064(OFFSET)"},
+        {0x0080, 0x01, 0x01, 0x0080, 0x01, 0x0A, "dst.format"},
+        {0x0081, 0x01, 0x01, 0x0080, 0x01, 0x0A, "dst.linear"},
+        {0x0082, 0x01, 0x01, 0x0080, 0x01, 0x0A, "dst.block_width"},
+        {0x0082, 0x01, 0x01, 0x0080, 0x01, 0x0A, "dst.block_height"},
+        {0x0082, 0x01, 0x01, 0x0080, 0x01, 0x0A, "dst.block_depth"},
+        {0x0083, 0x01, 0x01, 0x0080, 0x01, 0x0A, "dst.depth"},
+        {0x0084, 0x01, 0x01, 0x0080, 0x01, 0x0A, "dst.layer"},
+        {0x0085, 0x01, 0x01, 0x0080, 0x01, 0x0A, "dst.pitch"},
+        {0x0086, 0x01, 0x01, 0x0080, 0x01, 0x0A, "dst.width"},
+        {0x0087, 0x01, 0x01, 0x0080, 0x01, 0x0A, "dst.height"},
+        {0x0088, 0x01, 0x01, 0x0080, 0x01, 0x0A, "dst.addr_upper"},
+        {0x0089, 0x01, 0x01, 0x0080, 0x01, 0x0A, "dst.addr_lower"},
+        {0x008A, 0x01, 0x01, 0x008A, 0x01, 0x01, "pixels_from_cpu_index_wrap"},
+        {0x008B, 0x01, 0x01, 0x008B, 0x01, 0x01, "kind2d_check_enable"},
+        {0x008C, 0x01, 0x01, 0x008C, 0x01, 0x0A, "src.format"},
+        {0x008D, 0x01, 0x01, 0x008C, 0x01, 0x0A, "src.linear"},
+        {0x008E, 0x01, 0x01, 0x008C, 0x01, 0x0A, "src.block_width"},
+        {0x008E, 0x01, 0x01, 0x008C, 0x01, 0x0A, "src.block_height"},
+        {0x008E, 0x01, 0x01, 0x008C, 0x01, 0x0A, "src.block_depth"},
+        {0x008F, 0x01, 0x01, 0x008C, 0x01, 0x0A, "src.depth"},
+        {0x0090, 0x01, 0x01, 0x008C, 0x01, 0x0A, "src.layer"},
+        {0x0091, 0x01, 0x01, 0x008C, 0x01, 0x0A, "src.pitch"},
+        {0x0092, 0x01, 0x01, 0x008C, 0x01, 0x0A, "src.width"},
+        {0x0093, 0x01, 0x01, 0x008C, 0x01, 0x0A, "src.height"},
+        {0x0094, 0x01, 0x01, 0x008C, 0x01, 0x0A, "src.addr_upper"},
+        {0x0095, 0x01, 0x01, 0x008C, 0x01, 0x0A, "src.addr_lower"},
+        {0x0096, 0x01, 0x01, 0x0096, 0x01, 0x01, "pixels_from_memory_sector_promotion"},
+        {0x0097, 0x01, 0x01, 0x0097, 0x01, 0x01, "unk_0097(OFFSET)"},
+        {0x0098, 0x01, 0x01, 0x0098, 0x01, 0x01, "num_tpcs"},
+        {0x0099, 0x01, 0x01, 0x0099, 0x01, 0x01, "render_enable_addr_upper"},
+        {0x009A, 0x01, 0x01, 0x009A, 0x01, 0x01, "render_enable_addr_lower"},
+        {0x009B, 0x01, 0x01, 0x009B, 0x01, 0x01, "render_enable_mode"},
+        {0x009C, 0x04, 0x01, 0x009C, 0x01, 0x01, "unk_009C(OFFSET)"},
+        {0x00A0, 0x01, 0x01, 0x00A0, 0x01, 0x01, "clip_x0"},
+        {0x00A1, 0x01, 0x01, 0x00A1, 0x01, 0x01, "clip_y0"},
+        {0x00A2, 0x01, 0x01, 0x00A2, 0x01, 0x01, "clip_width"},
+        {0x00A3, 0x01, 0x01, 0x00A3, 0x01, 0x01, "clip_height"},
+        {0x00A4, 0x01, 0x01, 0x00A4, 0x01, 0x01, "clip_enable"},
+        {0x00A5, 0x01, 0x01, 0x00A5, 0x01, 0x01, "color_key_format"},
+        {0x00A6, 0x01, 0x01, 0x00A6, 0x01, 0x01, "color_key"},
+        {0x00A7, 0x01, 0x01, 0x00A7, 0x01, 0x01, "color_key_enable"},
+        {0x00A8, 0x01, 0x01, 0x00A8, 0x01, 0x01, "rop"},
+        {0x00A9, 0x01, 0x01, 0x00A9, 0x01, 0x01, "beta1"},
+        {0x00AA, 0x01, 0x01, 0x00AA, 0x01, 0x01, "beta4.b"},
+        {0x00AA, 0x01, 0x01, 0x00AA, 0x01, 0x01, "beta4.g"},
+        {0x00AA, 0x01, 0x01, 0x00AA, 0x01, 0x01, "beta4.r"},
+        {0x00AA, 0x01, 0x01, 0x00AA, 0x01, 0x01, "beta4.a"},
+        {0x00AB, 0x01, 0x01, 0x00AB, 0x01, 0x01, "operation"},
+        {0x00AC, 0x01, 0x01, 0x00AC, 0x01, 0x01, "pattern_offset.x"},
+        {0x00AC, 0x01, 0x01, 0x00AC, 0x01, 0x01, "pattern_offset.y"},
+        {0x00AD, 0x01, 0x01, 0x00AD, 0x01, 0x01, "pattern_select"},
+        {0x00AE, 0x0C, 0x01, 0x00AE, 0x01, 0x01, "unk_00AE(OFFSET)"},
+        {0x00BA, 0x01, 0x01, 0x00BA, 0x01, 0x06, "monochrome_pattern.color_format"},
+        {0x00BB, 0x01, 0x01, 0x00BA, 0x01, 0x06, "monochrome_pattern.format"},
+        {0x00BC, 0x01, 0x01, 0x00BA, 0x01, 0x06, "monochrome_pattern.color0"},
+        {0x00BD, 0x01, 0x01, 0x00BA, 0x01, 0x06, "monochrome_pattern.color1"},
+        {0x00BE, 0x01, 0x01, 0x00BA, 0x01, 0x06, "monochrome_pattern.pattern0"},
+        {0x00BF, 0x01, 0x01, 0x00BA, 0x01, 0x06, "monochrome_pattern.pattern1"},
+        {0x00C0, 0x40, 0x01, 0x00C0, 0x01, 0x90, "color_pattern.X8R8G8B8(OFFSET)"},
+        {0x0100, 0x20, 0x01, 0x00C0, 0x01, 0x90, "color_pattern.R5G6B5(OFFSET)"},
+        {0x0120, 0x20, 0x01, 0x00C0, 0x01, 0x90, "color_pattern.X1R5G5B5(OFFSET)"},
+        {0x0140, 0x10, 0x01, 0x00C0, 0x01, 0x90, "color_pattern.Y8(OFFSET)"},
+        {0x0150, 0x10, 0x01, 0x0150, 0x01, 0x01, "unk_0150(OFFSET)"},
+        {0x0160, 0x01, 0x01, 0x0160, 0x01, 0xA0, "render_solid.prim_mode"},
+        {0x0161, 0x01, 0x01, 0x0160, 0x01, 0xA0, "render_solid.prim_color_format"},
+        {0x0162, 0x01, 0x01, 0x0160, 0x01, 0xA0, "render_solid.prim_color"},
+        {0x0163, 0x01, 0x01, 0x0160, 0x01, 0xA0, "render_solid.line_tie_break_bits"},
+        {0x0164, 0x14, 0x01, 0x0160, 0x01, 0xA0, "render_solid.unk_0164(OFFSET).x"},
+        {0x0165, 0x14, 0x01, 0x0160, 0x01, 0xA0, "render_solid.unk_0164(OFFSET).y"},
+        {0x0178, 0x01, 0x01, 0x0160, 0x01, 0xA0, "render_solid.prim_point_xy"},
+        {0x0179, 0x07, 0x01, 0x0160, 0x01, 0xA0, "render_solid.unk_0179(OFFSET)"},
+        {0x0180, 0x40, 0x02, 0x0160, 0x01, 0xA0, "render_solid.prim_point(OFFSET)"},
+        {0x0200, 0x01, 0x01, 0x0200, 0x01, 0x19, "pixels_from_cpu.data_type"},
+        {0x0201, 0x01, 0x01, 0x0200, 0x01, 0x19, "pixels_from_cpu.color_format"},
+        {0x0202, 0x01, 0x01, 0x0200, 0x01, 0x19, "pixels_from_cpu.index_format"},
+        {0x0203, 0x01, 0x01, 0x0200, 0x01, 0x19, "pixels_from_cpu.mono_format"},
+        {0x0204, 0x01, 0x01, 0x0200, 0x01, 0x19, "pixels_from_cpu.wrap"},
+        {0x0205, 0x01, 0x01, 0x0200, 0x01, 0x19, "pixels_from_cpu.color0"},
+        {0x0206, 0x01, 0x01, 0x0200, 0x01, 0x19, "pixels_from_cpu.color1"},
+        {0x0207, 0x01, 0x01, 0x0200, 0x01, 0x19, "pixels_from_cpu.mono_opacity"},
+        {0x0208, 0x06, 0x01, 0x0200, 0x01, 0x19, "pixels_from_cpu.unk_0208(OFFSET)"},
+        {0x020E, 0x01, 0x01, 0x0200, 0x01, 0x19, "pixels_from_cpu.src_width"},
+        {0x020F, 0x01, 0x01, 0x0200, 0x01, 0x19, "pixels_from_cpu.src_height"},
+        {0x0210, 0x01, 0x01, 0x0200, 0x01, 0x19, "pixels_from_cpu.dx_du_frac"},
+        {0x0211, 0x01, 0x01, 0x0200, 0x01, 0x19, "pixels_from_cpu.dx_du_int"},
+        {0x0212, 0x01, 0x01, 0x0200, 0x01, 0x19, "pixels_from_cpu.dx_dv_frac"},
+        {0x0213, 0x01, 0x01, 0x0200, 0x01, 0x19, "pixels_from_cpu.dy_dv_int"},
+        {0x0214, 0x01, 0x01, 0x0200, 0x01, 0x19, "pixels_from_cpu.dst_x0_frac"},
+        {0x0215, 0x01, 0x01, 0x0200, 0x01, 0x19, "pixels_from_cpu.dst_x0_int"},
+        {0x0216, 0x01, 0x01, 0x0200, 0x01, 0x19, "pixels_from_cpu.dst_y0_frac"},
+        {0x0217, 0x01, 0x01, 0x0200, 0x01, 0x19, "pixels_from_cpu.dst_y0_int"},
+        {0x0218, 0x01, 0x01, 0x0200, 0x01, 0x19, "pixels_from_cpu.data"},
+        {0x021C, 0x01, 0x01, 0x021C, 0x01, 0x01, "big_endian_control"},
+        {0x0220, 0x01, 0x01, 0x0220, 0x01, 0x18, "pixels_from_memory.block_shape"},
+        {0x0221, 0x01, 0x01, 0x0220, 0x01, 0x18, "pixels_from_memory.corral_size"},
+        {0x0222, 0x01, 0x01, 0x0220, 0x01, 0x18, "pixels_from_memory.safe_overlap"},
+        {0x0223, 0x01, 0x01, 0x0220, 0x01, 0x18, "pixels_from_memory.sample_mode.origin"},
+        {0x0223, 0x01, 0x01, 0x0220, 0x01, 0x18, "pixels_from_memory.sample_mode.filter"},
+        {0x0224, 0x08, 0x01, 0x0220, 0x01, 0x18, "pixels_from_memory.unk_0224(OFFSET)"},
+        {0x022C, 0x01, 0x01, 0x0220, 0x01, 0x18, "pixels_from_memory.dst_x0"},
+        {0x022D, 0x01, 0x01, 0x0220, 0x01, 0x18, "pixels_from_memory.dst_y0"},
+        {0x022E, 0x01, 0x01, 0x0220, 0x01, 0x18, "pixels_from_memory.dst_width"},
+        {0x022F, 0x01, 0x01, 0x0220, 0x01, 0x18, "pixels_from_memory.dst_height"},
+        {0x0230, 0x01, 0x02, 0x0220, 0x01, 0x18, "pixels_from_memory.du_dx"},
+        {0x0232, 0x01, 0x02, 0x0220, 0x01, 0x18, "pixels_from_memory.dv_dy"},
+        {0x0234, 0x01, 0x02, 0x0220, 0x01, 0x18, "pixels_from_memory.src_x0"},
+        {0x0236, 0x01, 0x02, 0x0220, 0x01, 0x18, "pixels_from_memory.src_y0"},
+    }};
 }
 
 [[nodiscard]] static constexpr REG_LIST BuildMaxwellMethods() {
@@ -1876,3 +2356,4 @@ std::vector<std::string> Record::GetMethodNames(GPU::RecordEntry& entry,
 }
 
 } // namespace Tegra
+#pragma optimize("", on)

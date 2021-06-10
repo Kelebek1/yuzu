@@ -363,17 +363,6 @@ void RasterizerOpenGL::Clear() {
         return;
     }
 
-    if constexpr (Tegra::Record::RECORD_ENGINE[Tegra::Record::GetEngineIndex(
-                      Tegra::EngineID::MAXWELL_B)]) {
-        if (gpu.RECORD_DRAW == 0) {
-            const std::string msg{fmt::format("Draw {}", gpu.RECORD_DRAW)};
-            glDebugMessageInsert(GL_DEBUG_SOURCE_APPLICATION, GL_DEBUG_TYPE_MARKER,
-                                 static_cast<GLuint>(gpu.RECORD_DRAW),
-                                 GL_DEBUG_SEVERITY_NOTIFICATION, static_cast<GLsizei>(msg.size()),
-                                 msg.c_str());
-        }
-    }
-
     const auto& regs = maxwell3d.regs;
     bool use_color{};
     bool use_depth{};
@@ -435,6 +424,12 @@ void RasterizerOpenGL::Clear() {
         glClearBufferiv(GL_STENCIL, 0, &regs.clear_stencil);
     }
     ++num_queued_commands;
+
+    if constexpr (Tegra::Record::DO_RECORD) {
+        if (gpu.CURRENTLY_RECORDING || device.HasDebuggingToolAttached()) {
+            Tegra::Record::OutputMarkerOGL(&gpu);
+        }
+    }
 }
 
 void RasterizerOpenGL::Draw(bool is_indexed, bool is_instanced) {
@@ -499,13 +494,10 @@ void RasterizerOpenGL::Draw(bool is_indexed, bool is_instanced) {
 
     gpu.TickWork();
 
-    if constexpr (Tegra::Record::RECORD_ENGINE[Tegra::Record::GetEngineIndex(
-                      Tegra::EngineID::MAXWELL_B)]) {
-        gpu.RECORD_DRAW++;
-        const std::string msg{fmt::format("Draw {}", gpu.RECORD_DRAW)};
-        glDebugMessageInsert(GL_DEBUG_SOURCE_APPLICATION, GL_DEBUG_TYPE_MARKER,
-                             static_cast<GLuint>(gpu.RECORD_DRAW), GL_DEBUG_SEVERITY_NOTIFICATION,
-                             static_cast<GLsizei>(msg.size()), msg.c_str());
+    if constexpr (Tegra::Record::DO_RECORD) {
+        if (gpu.CURRENTLY_RECORDING || device.HasDebuggingToolAttached()) {
+            Tegra::Record::OutputMarkerOGL(&gpu);
+        }
     }
 }
 
@@ -700,6 +692,11 @@ bool RasterizerOpenGL::AccelerateSurfaceCopy(const Tegra::Engines::Fermi2D::Surf
     MICROPROFILE_SCOPE(OpenGL_Blits);
     std::scoped_lock lock{texture_cache.mutex};
     texture_cache.BlitImage(dst, src, copy_config);
+    if constexpr (Tegra::Record::DO_RECORD) {
+        if (gpu.CURRENTLY_RECORDING || device.HasDebuggingToolAttached()) {
+            Tegra::Record::OutputMarkerOGL(&gpu);
+        }
+    }
     return true;
 }
 

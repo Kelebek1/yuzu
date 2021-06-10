@@ -358,7 +358,7 @@ public:
     };
     std::atomic<bool> CURRENTLY_RECORDING = false;
     std::atomic<u32> RECORD_DRAW = 0;
-    std::unordered_map<u32, RecordEntry> RECORD_OLD_REGS;
+    std::array<std::unordered_map<u32, RecordEntry>, 5> RECORD_OLD_REGS;
     std::chrono::time_point<std::chrono::high_resolution_clock> RECORD_TIME_ORIGIN;
     std::vector<RecordEntry> METHODS_CALLED;
     std::mutex record_mutex;

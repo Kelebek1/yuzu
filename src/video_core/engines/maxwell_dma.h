@@ -197,26 +197,6 @@ public:
     void CallMultiMethod(u32 method, const u32* base_start, u32 amount,
                          u32 methods_pending) override;
 
-private:
-    /// Performs the copy from the source buffer to the destination buffer as configured in the
-    /// registers.
-    void Launch();
-
-    void CopyPitchToPitch();
-
-    void CopyBlockLinearToPitch();
-
-    void CopyPitchToBlockLinear();
-
-    void FastCopyBlockLinearToPitch();
-
-    Core::System& system;
-
-    MemoryManager& memory_manager;
-
-    std::vector<u8> read_buffer;
-    std::vector<u8> write_buffer;
-
     static constexpr std::size_t NUM_REGS = 0x800;
     struct Regs {
         union {
@@ -252,6 +232,26 @@ private:
             std::array<u32, NUM_REGS> reg_array;
         };
     } regs{};
+
+private:
+    /// Performs the copy from the source buffer to the destination buffer as configured in the
+    /// registers.
+    void Launch();
+
+    void CopyPitchToPitch();
+
+    void CopyBlockLinearToPitch();
+
+    void CopyPitchToBlockLinear();
+
+    void FastCopyBlockLinearToPitch();
+
+    Core::System& system;
+
+    MemoryManager& memory_manager;
+
+    std::vector<u8> read_buffer;
+    std::vector<u8> write_buffer;
 
 #define ASSERT_REG_POSITION(field_name, position)                                                  \
     static_assert(offsetof(MaxwellDMA::Regs, field_name) == position * 4,                          \

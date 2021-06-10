@@ -19,7 +19,7 @@ class Record {
 public:
     /// Debug-only. Enable an engine to record its method calls for each frame.
     static constexpr std::array<bool, 5> RECORD_ENGINE{
-        false, // FERMI_TWOD_A
+        true, // FERMI_TWOD_A
         true,  // MAXWELL_B
         false, // KEPLER_COMPUTE_B
         false, // KEPLER_INLINE_TO_MEMORY_B
@@ -42,6 +42,22 @@ public:
             return 4;
         }
         return 1;
+    }
+
+    [[nodiscard]] static constexpr EngineID GetEngineIDFromIndex(const u32 index) {
+        switch (index) {
+        case 0:
+            return EngineID::FERMI_TWOD_A;
+        case 1:
+            return EngineID::MAXWELL_B;
+        case 2:
+            return EngineID::KEPLER_COMPUTE_B;
+        case 3:
+            return EngineID::KEPLER_INLINE_TO_MEMORY_B;
+        case 4:
+            return EngineID::MAXWELL_DMA_COPY_A;
+        }
+        return EngineID::MAXWELL_B;
     }
 
     [[nodiscard]] static std::string_view GetEngineName(Tegra::EngineID id) {
@@ -79,6 +95,7 @@ public:
     };
 
     static void BuildResults(Tegra::GPU* gpu, size_t frame);
+    static void OutputMarkerOGL(Tegra::GPU* gpu);
 
     [[nodiscard]] static std::vector<std::string> GetMethodNames(
         GPU::RecordEntry& entry, std::array<Method, 400>::const_iterator start_it,

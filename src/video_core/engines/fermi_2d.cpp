@@ -4,13 +4,15 @@
 
 #include "common/assert.h"
 #include "common/logging/log.h"
+#include "core/core.h"
 #include "video_core/engines/fermi_2d.h"
 #include "video_core/memory_manager.h"
 #include "video_core/rasterizer_interface.h"
+#include "video_core/record.h"
 
 namespace Tegra::Engines {
 
-Fermi2D::Fermi2D() {
+Fermi2D::Fermi2D(Core::System& system_) : system{system_} {
     // Nvidia's OpenGL driver seems to assume these values
     regs.src.depth = 1;
     regs.dst.depth = 1;
@@ -22,15 +24,27 @@ void Fermi2D::BindRasterizer(VideoCore::RasterizerInterface* rasterizer_) {
     rasterizer = rasterizer_;
 }
 
+#pragma optimize("", off)
 void Fermi2D::CallMethod(u32 method, u32 method_argument, bool is_last_call) {
     ASSERT_MSG(method < Regs::NUM_REGS,
                "Invalid Fermi2D register, increase the size of the Regs structure");
+    if constexpr (Tegra::Record::RECORD_ENGINE[Tegra::Record::GetEngineIndex(
+                      EngineID::FERMI_TWOD_A)]) {
+        auto& gpu = system.GetInstance().GPU();
+        std::scoped_lock lock{gpu.record_mutex};
+        if (gpu.CURRENTLY_RECORDING) {
+            gpu.METHODS_CALLED.emplace_back(EngineID::FERMI_TWOD_A, method, method_argument,
+                                            std::chrono::high_resolution_clock::now(),
+                                            gpu.RECORD_DRAW);
+        }
+    }
     regs.reg_array[method] = method_argument;
 
     if (method == FERMI2D_REG_INDEX(pixels_from_memory.src_y0) + 1) {
         Blit();
     }
 }
+#pragma optimize("", on)
 
 void Fermi2D::CallMultiMethod(u32 method, const u32* base_start, u32 amount, u32 methods_pending) {
     for (u32 i = 0; i < amount; ++i) {
