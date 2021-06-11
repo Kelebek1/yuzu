@@ -4,7 +4,8 @@
 
 #pragma once
 
-#include <memory>
+#include <array>
+#include <vector>
 #include <QDialog>
 #include <QTimer>
 #include <QWidget>
@@ -38,6 +39,7 @@ public:
 
 private:
     void UpdateViews(const QString& new_text);
+    void HideUnkStateChanged(s32 state);
     void OnFilterChanged(const QString& new_text);
     void HideFilterColumns(
         const std::array<QStringList, static_cast<s32>(Columns::COUNT)>& filters);
@@ -55,6 +57,8 @@ private:
     Core::System& system;
     QTimer* resultsTimer;
     size_t savedFrame = 0;
-    std::vector<u32> results_indexes;
+    std::vector<u32> results_changed_indexes;
+    std::vector<u32> results_unchanged_indexes;
     std::vector<u32> draw_indexes;
+    std::array<std::vector<u32>, 5> pre_indexes;
 };

@@ -31,9 +31,8 @@ ConfigureDebugRecord::ConfigureDebugRecord(QWidget* parent)
     QStandardItemModel* drawModel = new QStandardItemModel();
     ui->table_record_draw_state->setModel(drawModel);
     drawModel->insertColumns(0, static_cast<s32>(Columns::COUNT));
-    drawModel->setHorizontalHeaderLabels(QStringList(
-        {QString::fromLatin1("Time"), QString::fromLatin1("Engine"), QString::fromLatin1("Reg"),
-         QString::fromLatin1("Method"), QString::fromLatin1("Argument")}));
+    drawModel->setHorizontalHeaderLabels(
+        QStringList({tr("Time"), tr("Engine"), tr("Reg"), tr("Method"), tr("Argument")}));
     ui->table_record_draw_state->verticalHeader()->setVisible(false);
     ui->table_record_draw_state->horizontalHeader()->setStretchLastSection(false);
     ui->table_record_draw_state->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft);
@@ -45,9 +44,8 @@ ConfigureDebugRecord::ConfigureDebugRecord(QWidget* parent)
     QStandardItemModel* preModel = new QStandardItemModel();
     ui->table_record_pre_state->setModel(preModel);
     preModel->insertColumns(0, static_cast<s32>(Columns::COUNT));
-    preModel->setHorizontalHeaderLabels(QStringList(
-        {QString::fromLatin1("Time"), QString::fromLatin1("Engine"), QString::fromLatin1("Reg"),
-         QString::fromLatin1("Method"), QString::fromLatin1("Argument")}));
+    preModel->setHorizontalHeaderLabels(
+        QStringList({tr("Time"), tr("Engine"), tr("Reg"), tr("Method"), tr("Argument")}));
     ui->table_record_pre_state->verticalHeader()->setVisible(false);
     ui->table_record_pre_state->hideColumn(static_cast<s32>(Columns::TIME));
     ui->table_record_pre_state->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft);
@@ -84,13 +82,25 @@ ConfigureDebugRecord::ConfigureDebugRecord(QWidget* parent)
     connect(ui->send_to_console, &QPushButton::clicked, [this]() { Print(); });
     connect(ui->lineEdit_filter, &QLineEdit::textEdited, this,
             &ConfigureDebugRecord::OnFilterChanged);
+    connect(ui->checkBox_hide_unk, &QCheckBox::stateChanged, this,
+            &ConfigureDebugRecord::HideUnkStateChanged);
 }
 
 ConfigureDebugRecord::~ConfigureDebugRecord() = default;
 
+void ConfigureDebugRecord::HideUnkStateChanged(s32 state) {
+    HideAllRows();
+    ShowRows(ui->list_record_draws->currentRow());
+    UpdateViews(ui->lbl_filter->text());
+}
+
 void ConfigureDebugRecord::HideFilterColumns(
     const std::array<QStringList, static_cast<s32>(Columns::COUNT)>& filters) {
     const auto& gpu = system.GPU();
+
+    ui->table_record_draw_state->blockSignals(true);
+    ui->table_record_pre_state->blockSignals(true);
+
     const auto currentDraw = ui->list_record_draws->currentRow();
     QStandardItemModel* drawModel =
         static_cast<QStandardItemModel*>(ui->table_record_draw_state->model());
@@ -120,7 +130,7 @@ void ConfigureDebugRecord::HideFilterColumns(
         for (size_t col = 0; col < filters.size(); ++col) {
             const auto item = preModel->item(i, static_cast<s32>(col));
             for (auto& filter : filters[col]) {
-                if (item->text().contains(filter)) {
+                if (item->text().contains(filter, Qt::CaseInsensitive)) {
                     showThisRow[col] = true;
                 }
             }
@@ -132,6 +142,9 @@ void ConfigureDebugRecord::HideFilterColumns(
             ui->table_record_pre_state->hideRow(i);
         }
     }
+
+    ui->table_record_draw_state->blockSignals(false);
+    ui->table_record_pre_state->blockSignals(false);
 }
 
 void ConfigureDebugRecord::UpdateViews(const QString& new_text) {
@@ -143,7 +156,6 @@ void ConfigureDebugRecord::UpdateViews(const QString& new_text) {
     }
 
     ui->table_record_draw_state->scrollToTop();
-    ui->table_record_pre_state->scrollToTop();
     ResizeColumns();
     ui->table_record_draw_state->update();
     ui->table_record_pre_state->update();
@@ -157,23 +169,23 @@ std::array<QStringList, static_cast<s32>(Columns::COUNT)> ConfigureDebugRecord::
         return filters;
     }
 
-    auto in_filters = new_text.split(QString::fromLatin1(" "));
+    auto in_filters = new_text.split(tr(" "));
 
     for (auto& in_filter : in_filters) {
         if (in_filter.isEmpty()) {
             continue;
         }
-        if (in_filter.contains(QString::fromLatin1(":"))) {
-            QStringList a = in_filter.split(QString::fromLatin1(":"));
-            if (a[0].contains(QString::fromLatin1("time"))) {
+        if (in_filter.contains(tr(":"))) {
+            QStringList a = in_filter.split(tr(":"));
+            if (a[0].contains(tr("time"), Qt::CaseInsensitive)) {
                 filters[static_cast<s32>(Columns::TIME)].push_back(a[1]);
-            } else if (a[0].contains(QString::fromLatin1("eng"))) {
+            } else if (a[0].contains(tr("eng"), Qt::CaseInsensitive)) {
                 filters[static_cast<s32>(Columns::ENGINE)].push_back(a[1]);
-            } else if (a[0].contains(QString::fromLatin1("reg"))) {
+            } else if (a[0].contains(tr("reg"), Qt::CaseInsensitive)) {
                 filters[static_cast<s32>(Columns::REG)].push_back(a[1]);
-            } else if (a[0].contains(QString::fromLatin1("meth"))) {
+            } else if (a[0].contains(tr("meth"), Qt::CaseInsensitive)) {
                 filters[static_cast<s32>(Columns::METHOD)].push_back(a[1]);
-            } else if (a[0].contains(QString::fromLatin1("arg"))) {
+            } else if (a[0].contains(tr("arg"), Qt::CaseInsensitive)) {
                 filters[static_cast<s32>(Columns::ARGUMENT)].push_back(a[1]);
             }
         } else {
@@ -192,9 +204,16 @@ void ConfigureDebugRecord::OnFilterChanged(const QString& new_text) {
 void ConfigureDebugRecord::ShowRows(s32 draw = -1) {
     const auto& gpu = system.GPU();
 
+    ui->table_record_draw_state->blockSignals(true);
+    ui->table_record_pre_state->blockSignals(true);
+
     s32 i = 0;
     for (const auto& result : gpu.RECORD_RESULTS_CHANGED) {
         for (const auto& arg : result.args) {
+            if (ui->checkBox_hide_unk->isChecked() && arg.first.find("unk_") != std::string::npos) {
+                ++i;
+                continue;
+            }
             if (draw == -1 || result.draw == draw) {
                 ui->table_record_draw_state->showRow(i);
             }
@@ -202,13 +221,27 @@ void ConfigureDebugRecord::ShowRows(s32 draw = -1) {
         }
     }
 
-    for (s32 j = 0; j < i; ++j) {
-        ui->table_record_pre_state->showRow(j);
+    i = 0;
+    for (const auto& result : gpu.RECORD_RESULTS_UNCHANGED) {
+        for (const auto& arg : result.args) {
+            if (ui->checkBox_hide_unk->isChecked() && arg.first.find("unk_") != std::string::npos) {
+                ++i;
+                continue;
+            }
+            ui->table_record_pre_state->showRow(i);
+            ++i;
+        }
     }
+
+    ui->table_record_draw_state->blockSignals(false);
+    ui->table_record_pre_state->blockSignals(false);
 }
 
 void ConfigureDebugRecord::HideAllRows() {
     const auto& gpu = system.GPU();
+
+    ui->table_record_draw_state->blockSignals(true);
+    ui->table_record_pre_state->blockSignals(true);
 
     s32 i = 0;
     for (const auto& result : gpu.RECORD_RESULTS_CHANGED) {
@@ -217,6 +250,9 @@ void ConfigureDebugRecord::HideAllRows() {
             ++i;
         }
     }
+
+    ui->table_record_draw_state->blockSignals(false);
+    ui->table_record_pre_state->blockSignals(false);
 }
 
 void ConfigureDebugRecord::DrawIndexChanged(s32 currentRow) {
@@ -233,11 +269,13 @@ void ConfigureDebugRecord::DrawIndexChanged(s32 currentRow) {
 
     HideAllRows();
     ShowRows(currentRow);
-
     UpdateViews(ui->lineEdit_filter->text());
 }
 
 void ConfigureDebugRecord::ResizeColumns() {
+    ui->table_record_draw_state->blockSignals(true);
+    ui->table_record_pre_state->blockSignals(true);
+
     QStandardItemModel* drawModel =
         static_cast<QStandardItemModel*>(ui->table_record_draw_state->model());
     QStandardItemModel* preModel =
@@ -274,6 +312,9 @@ void ConfigureDebugRecord::ResizeColumns() {
     }
     ui->table_record_pre_state->setColumnWidth(static_cast<s32>(Columns::METHOD),
                                                ui->table_record_pre_state->width() - width - 20);
+
+    ui->table_record_draw_state->blockSignals(false);
+    ui->table_record_pre_state->blockSignals(false);
 }
 
 void ConfigureDebugRecord::ClearResults() {
@@ -289,7 +330,7 @@ void ConfigureDebugRecord::ClearResults() {
     preModel->removeRows(0, preModel->rowCount());
     ui->table_record_draw_state->setModel(drawModel);
     ui->table_record_pre_state->setModel(preModel);
-    results_indexes.clear();
+    results_changed_indexes.clear();
     draw_indexes.clear();
 }
 
@@ -308,7 +349,7 @@ void ConfigureDebugRecord::BuildResults() {
     s32 lastDraw = -1;
     for (const auto& result : gpu.RECORD_RESULTS_CHANGED) {
         if (lastDraw != result.draw) {
-            results_indexes.push_back(idx);
+            results_changed_indexes.push_back(idx);
             draw_indexes.push_back(total_row_count);
             lastDraw = result.draw;
         }
@@ -317,15 +358,37 @@ void ConfigureDebugRecord::BuildResults() {
         }
         ++idx;
     }
-    results_indexes.push_back(idx);
+    results_changed_indexes.push_back(idx);
     draw_indexes.push_back(total_row_count);
     drawModel->setRowCount(total_row_count);
 
+    const auto GetEngineIdx = [](std::string engine) -> s32 {
+        if (engine.find("FERMI") != std::string::npos) {
+            return 0;
+        } else if (engine.find("MAXWELL") != std::string::npos) {
+            return 1;
+        } else if (engine.find("KEPLERC") != std::string::npos) {
+            return 2;
+        } else if (engine.find("KEPLERI") != std::string::npos) {
+            return 3;
+        } else if (engine.find("MAXDMA") != std::string::npos) {
+            return 4;
+        }
+        return 1;
+    };
+    std::string lastEngine{""};
     total_row_count = 0;
+    idx = 0;
     for (const auto& result : gpu.RECORD_RESULTS_UNCHANGED) {
+        if (lastEngine != result.engineName) {
+            results_unchanged_indexes.push_back(idx);
+            pre_indexes[GetEngineIdx(result.engineName)].push_back(total_row_count);
+            lastEngine = result.engineName;
+        }
         for (const auto& arg : result.args) {
             ++total_row_count;
         }
+        ++idx;
     }
     preModel->setRowCount(total_row_count);
 
@@ -356,7 +419,6 @@ void ConfigureDebugRecord::BuildResults() {
     ui->table_record_pre_state->hideColumn(static_cast<s32>(Columns::TIME));
 
     ui->list_record_draws->setCurrentRow(0);
-    FillDrawIndex(0);
     DrawIndexChanged(0);
 
     ui->do_capture->setEnabled(true);
@@ -371,8 +433,8 @@ void ConfigureDebugRecord::FillDrawIndex(u32 idx) {
     ui->table_record_draw_state->setModel(nullptr);
 
     u32 draw_idx = draw_indexes.at(idx);
-    u32 result_idx = results_indexes.at(idx);
-    while (result_idx < results_indexes.at(idx + 1)) {
+    u32 result_idx = results_changed_indexes.at(idx);
+    while (result_idx < results_changed_indexes.at(idx + 1)) {
         const auto& result = gpu.RECORD_RESULTS_CHANGED[result_idx++];
         for (const auto& arg : result.args) {
             // Build out the list of args

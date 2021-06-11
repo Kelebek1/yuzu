@@ -201,33 +201,33 @@ public:
     struct Regs {
         union {
             struct {
-                u32 reserved[0x40];
-                u32 nop;
-                u32 reserved01[0xf];
-                u32 pm_trigger;
-                u32 reserved02[0x3f];
-                Semaphore semaphore;
-                u32 reserved03[0x2];
-                RenderEnable render_enable;
-                PhysMode src_phys_mode;
-                PhysMode dst_phys_mode;
-                u32 reserved04[0x26];
-                LaunchDMA launch_dma;
-                u32 reserved05[0x3f];
-                PackedGPUVAddr offset_in;
-                PackedGPUVAddr offset_out;
-                u32 pitch_in;
-                u32 pitch_out;
-                u32 line_length_in;
-                u32 line_count;
-                u32 reserved06[0xb8];
-                RemapConst remap_const;
-                Parameters dst_params;
-                u32 reserved07[0x1];
-                Parameters src_params;
-                u32 reserved08[0x275];
-                u32 pm_trigger_end;
-                u32 reserved09[0x3ba];
+                /* 0x0000 */ u32 reserved[0x40];
+                /* 0x0100 */ u32 nop;
+                /* 0x0104 */ u32 reserved01[0xF];
+                /* 0x0140 */ u32 pm_trigger;
+                /* 0x0144 */ u32 reserved02[0x3F];
+                /* 0x0240 */ Semaphore semaphore;
+                /* 0x024C */ u32 reserved03[0x2];
+                /* 0x0254 */ RenderEnable render_enable;
+                /* 0x0260 */ PhysMode src_phys_mode;
+                /* 0x0264 */ PhysMode dst_phys_mode;
+                /* 0x0268 */ u32 reserved04[0x26];
+                /* 0x0300 */ LaunchDMA launch_dma;
+                /* 0x0304 */ u32 reserved05[0x3F];
+                /* 0x0400 */ PackedGPUVAddr offset_in;
+                /* 0x0408 */ PackedGPUVAddr offset_out;
+                /* 0x0410 */ u32 pitch_in;
+                /* 0x0414 */ u32 pitch_out;
+                /* 0x0418 */ u32 line_length_in;
+                /* 0x041C */ u32 line_count;
+                /* 0x0420 */ u32 reserved06[0xB8];
+                /* 0x0700 */ RemapConst remap_const;
+                /* 0x070C */ Parameters dst_params;
+                /* 0x0724 */ u32 reserved07[0x1];
+                /* 0x0728 */ Parameters src_params;
+                /* 0x0740 */ u32 reserved08[0x275];
+                /* 0x1114 */ u32 pm_trigger_end;
+                /* 0x1118 */ u32 reserved09[0x3BA];
             };
             std::array<u32, NUM_REGS> reg_array;
         };
@@ -267,6 +267,7 @@ private:
     ASSERT_REG_POSITION(remap_const, 0x1C0);
     ASSERT_REG_POSITION(dst_params, 0x1C3);
     ASSERT_REG_POSITION(src_params, 0x1CA);
+    ASSERT_REG_POSITION(pm_trigger_end, 0x445);
 
 #undef ASSERT_REG_POSITION
 };

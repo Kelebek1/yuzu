@@ -509,6 +509,7 @@ void GPU::ClearCdmaInstance() {
 }
 
 void GPU::SwapBuffers(const Tegra::FramebufferConfig* framebuffer) {
+    gpu_thread.SwapBuffers(framebuffer);
     if constexpr (Tegra::Record::DO_RECORD) {
         std::scoped_lock lock{record_mutex};
         if (CURRENTLY_RECORDING) {
@@ -581,11 +582,10 @@ void GPU::SwapBuffers(const Tegra::FramebufferConfig* framebuffer) {
             CURRENTLY_RECORDING = true;
             Settings::values.pending_frame_record = false;
             RECORD_TIME_ORIGIN = std::chrono::high_resolution_clock::now();
+            Record::CaptureFrames();
         }
-
         RECORD_DRAW = 0;
     }
-    gpu_thread.SwapBuffers(framebuffer);
 }
 
 void GPU::FlushRegion(VAddr addr, u64 size) {

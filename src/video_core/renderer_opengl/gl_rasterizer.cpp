@@ -427,7 +427,7 @@ void RasterizerOpenGL::Clear() {
 
     if constexpr (Tegra::Record::DO_RECORD) {
         if (gpu.CURRENTLY_RECORDING || device.HasDebuggingToolAttached()) {
-            Tegra::Record::OutputMarkerOGL(&gpu);
+            Tegra::Record::OutputMarker(&gpu);
         }
     }
 }
@@ -496,7 +496,7 @@ void RasterizerOpenGL::Draw(bool is_indexed, bool is_instanced) {
 
     if constexpr (Tegra::Record::DO_RECORD) {
         if (gpu.CURRENTLY_RECORDING || device.HasDebuggingToolAttached()) {
-            Tegra::Record::OutputMarkerOGL(&gpu);
+            Tegra::Record::OutputMarker(&gpu);
         }
     }
 }
@@ -694,7 +694,7 @@ bool RasterizerOpenGL::AccelerateSurfaceCopy(const Tegra::Engines::Fermi2D::Surf
     texture_cache.BlitImage(dst, src, copy_config);
     if constexpr (Tegra::Record::DO_RECORD) {
         if (gpu.CURRENTLY_RECORDING || device.HasDebuggingToolAttached()) {
-            Tegra::Record::OutputMarkerOGL(&gpu);
+            Tegra::Record::OutputMarker(&gpu);
         }
     }
     return true;

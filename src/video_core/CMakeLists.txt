@@ -158,6 +158,7 @@ add_library(video_core STATIC
     renderer_vulkan/vk_texture_cache.h
     renderer_vulkan/vk_update_descriptor.cpp
     renderer_vulkan/vk_update_descriptor.h
+    renderdoc/renderdoc.h
     shader_cache.h
     shader_notify.cpp
     shader_notify.h

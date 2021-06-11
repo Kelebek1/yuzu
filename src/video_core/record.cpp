@@ -3,18 +3,41 @@
 #include "record.h"
 #include "surface.h"
 #include "video_core/renderer_opengl/gl_rasterizer.h"
+#include "video_core/renderer_vulkan/vk_rasterizer.h"
+#include "video_core/renderdoc/renderdoc.h"
+
+namespace Vulkan::vk {
+class CommandBuffer;
+}
 
 namespace Tegra {
 #pragma optimize("", off)
-using Maxwell = Tegra::Engines::Maxwell3D;
 using Fermi = Tegra::Engines::Fermi2D;
+using Maxwell = Tegra::Engines::Maxwell3D;
+using KeplerCompute = Tegra::Engines::KeplerCompute;
+using KeplerMemory = Tegra::Engines::KeplerMemory;
+using MaxwellDMA = Tegra::Engines::MaxwellDMA;
 using REG_LIST = std::array<Record::Method, 400>;
 
-void Record::OutputMarkerOGL(Tegra::GPU* gpu) {
-    const std::string msg{fmt::format("End of draw {}", gpu->RECORD_DRAW)};
-    glDebugMessageInsert(GL_DEBUG_SOURCE_APPLICATION, GL_DEBUG_TYPE_MARKER,
-                         static_cast<GLuint>(gpu->RECORD_DRAW), GL_DEBUG_SEVERITY_NOTIFICATION,
-                         static_cast<GLsizei>(msg.size()), msg.c_str());
+void Record::OutputMarker(Tegra::GPU* gpu, Vulkan::VKScheduler* scheduler) {
+    const auto renderer = Settings::values.renderer_backend.GetValue();
+    const u32 draw = gpu->RECORD_DRAW;
+    const std::string msg{fmt::format("End Draw {}", draw)};
+
+    switch (renderer) {
+    case Settings::RendererBackend::OpenGL: {
+        glDebugMessageInsert(GL_DEBUG_SOURCE_APPLICATION, GL_DEBUG_TYPE_MARKER,
+                             static_cast<GLuint>(gpu->RECORD_DRAW), GL_DEBUG_SEVERITY_NOTIFICATION,
+                             static_cast<GLsizei>(msg.size()), msg.c_str());
+        break;
+    }
+    case Settings::RendererBackend::Vulkan: {
+        scheduler->Record([msg](Vulkan::vk::CommandBuffer cmdbuf) {
+            std::vector<float> colors{1.0f, 1.0f, 1.0f, 1.0f};
+            cmdbuf.InsertDebugUtilsLabelEXT(msg.c_str(), std::span<float, 4>(colors));
+        });
+    }
+    }
     gpu->RECORD_DRAW++;
 }
 
@@ -84,7 +107,10 @@ void Record::BuildResults(Tegra::GPU* gpu, size_t frame) {
     }
 
     std::sort(gpu->RECORD_RESULTS_UNCHANGED.begin(), gpu->RECORD_RESULTS_UNCHANGED.end(),
-              [](GPU::DrawResult& a, GPU::DrawResult& b) { return a.method < b.method; });
+              [](GPU::DrawResult& a, GPU::DrawResult& b) {
+                  return a.engineName < b.engineName ||
+                         (a.engineName == b.engineName && a.method < b.method);
+              });
 }
 
 [[nodiscard]] std::string Record::GetArgumentInfo(GPU::RecordEntry& entry,
@@ -490,14 +516,31 @@ std::string Record::GetMaxwellArg(GPU::RecordEntry& entry, REG_LIST::const_itera
     }
 
     case REG(upload.dest.block_width): {
+        const auto GetGob = [](u32 arg) -> std::string {
+            switch (arg) {
+            case 0:
+                return "OneGob";
+            case 1:
+                return "TwoGob";
+            case 2:
+                return "FourGob";
+            case 3:
+                return "EightGob";
+            case 4:
+                return "SixteenGob";
+            case 5:
+                return "ThirtyTwoGob";
+            }
+            return fmt::format("{}", arg);
+        };
         const auto arg = *(Tegra::Engines::Upload::Registers*)(&entry.arg);
         switch (i) {
         case 0:
-            return fmt::format("{}", arg.dest.block_width);
+            return GetGob(arg.dest.block_width);
         case 1:
-            return fmt::format("{}", arg.dest.block_height);
+            return GetGob(arg.dest.block_height);
         case 2:
-            return fmt::format("{}", arg.dest.block_depth);
+            return GetGob(arg.dest.block_depth);
         }
         break;
     }
@@ -1701,20 +1744,400 @@ std::string Record::GetMaxwellArg(GPU::RecordEntry& entry, REG_LIST::const_itera
 }
 #undef REG
 
+#define REG(field_name) (offsetof(KeplerCompute::Regs, field_name) / sizeof(u32))
 std::string Record::GetKeplerComputeArg(GPU::RecordEntry& entry, REG_LIST::const_iterator method,
                                         size_t i) {
-    return "";
-}
+    switch (method->offset) {
+    case REG(upload.dest.block_width): {
+        const auto GetGob = [](u32 arg) -> std::string {
+            switch (arg) {
+            case 0:
+                return "OneGob";
+            case 1:
+                return "TwoGob";
+            case 2:
+                return "FourGob";
+            case 3:
+                return "EightGob";
+            case 4:
+                return "SixteenGob";
+            case 5:
+                return "ThirtyTwoGob";
+            }
+            return fmt::format("{}", arg);
+        };
+        const auto arg = *(Tegra::Engines::Upload::Registers*)(&entry.arg);
+        switch (i) {
+        case 0:
+            return GetGob(arg.dest.block_width);
+        case 1:
+            return GetGob(arg.dest.block_height);
+        case 2:
+            return GetGob(arg.dest.block_depth);
+        }
+        break;
+    }
+    case REG(upload.dest.width):
+    case REG(upload.dest.height):
+    case REG(upload.dest.depth):
+    case REG(upload.dest.z):
+    case REG(upload.dest.x):
+    case REG(upload.dest.y):
+        return fmt::format("{}", entry.arg);
 
+    case REG(exec_upload.linear):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+
+    case REG(tex_cb_index):
+        return fmt::format("{}", entry.arg);
+    }
+
+    return fmt::format("0x{:X}", entry.arg);
+}
+#undef REG
+
+#define REG(field_name) (offsetof(KeplerMemory::Regs, field_name) / sizeof(u32))
 std::string Record::GetKeplerMemoryArg(GPU::RecordEntry& entry, REG_LIST::const_iterator method,
                                        size_t i) {
-    return "";
-}
+    switch (method->offset) {
+    case REG(upload.dest.block_width): {
+        const auto GetGob = [](u32 arg) -> std::string {
+            switch (arg) {
+            case 0:
+                return "OneGob";
+            case 1:
+                return "TwoGob";
+            case 2:
+                return "FourGob";
+            case 3:
+                return "EightGob";
+            case 4:
+                return "SixteenGob";
+            case 5:
+                return "ThirtyTwoGob";
+            }
+            return fmt::format("{}", arg);
+        };
+        const auto arg = *(Tegra::Engines::Upload::Registers*)(&entry.arg);
+        switch (i) {
+        case 0:
+            return GetGob(arg.dest.block_width);
+        case 1:
+            return GetGob(arg.dest.block_height);
+        case 2:
+            return GetGob(arg.dest.block_depth);
+        }
+        break;
+    }
+    case REG(upload.dest.width):
+    case REG(upload.dest.height):
+    case REG(upload.dest.depth):
+    case REG(upload.dest.z):
+    case REG(upload.dest.x):
+    case REG(upload.dest.y):
+        return fmt::format("{}", entry.arg);
 
+    case REG(exec.linear):
+        return fmt::format("{}", static_cast<bool>(entry.arg));
+    }
+    return fmt::format("0x{:X}", entry.arg);
+}
+#undef REG
+
+#define REG(field_name) (offsetof(MaxwellDMA::Regs, field_name) / sizeof(u32))
 std::string Record::GetMaxwellDMAArg(GPU::RecordEntry& entry, REG_LIST::const_iterator method,
                                      size_t i) {
-    return "";
+    switch (method->offset) {
+
+    case REG(render_enable.mode): {
+        const u32 temp = entry.arg & 0x7;
+        const auto arg = *(MaxwellDMA::RenderEnable::Mode*)(&entry.arg);
+        switch (arg) {
+        case MaxwellDMA::RenderEnable::Mode::False:
+            return "False";
+        case MaxwellDMA::RenderEnable::Mode::True:
+            return "True";
+        case MaxwellDMA::RenderEnable::Mode::Conditional:
+            return "Conditional";
+        case MaxwellDMA::RenderEnable::Mode::RenderIfEqual:
+            return "RenderIfEqual";
+        case MaxwellDMA::RenderEnable::Mode::RenderIfNotEqual:
+            return "RenderIfNotEqual";
+        }
+        break;
+    }
+
+    case REG(src_phys_mode):
+    case REG(dst_phys_mode): {
+        const u32 temp = entry.arg & 0x3;
+        const auto arg = *(MaxwellDMA::PhysModeTarget*)(&entry.arg);
+        switch (arg) {
+        case MaxwellDMA::PhysModeTarget::LOCAL_FB:
+            return "LOCAL_FB";
+        case MaxwellDMA::PhysModeTarget::COHERENT_SYSMEM:
+            return "COHERENT_SYSMEM";
+        case MaxwellDMA::PhysModeTarget::NONCOHERENT_SYSMEM:
+            return "NONCOHERENT_SYSMEM";
+        }
+        break;
+    }
+
+    case REG(launch_dma): {
+        switch (i) {
+        case 0: {
+            const u32 temp = entry.arg & 0x3;
+            const auto arg = *(MaxwellDMA::LaunchDMA::DataTransferType*)(&temp);
+            switch (arg) {
+            case MaxwellDMA::LaunchDMA::DataTransferType::NONE:
+                return "NONE";
+            case MaxwellDMA::LaunchDMA::DataTransferType::PIPELINED:
+                return "PIPELINED";
+            case MaxwellDMA::LaunchDMA::DataTransferType::NON_PIPELINED:
+                return "NON_PIPELINED";
+            }
+            break;
+        }
+        case 1:
+            return fmt::format("{}", static_cast<bool>((entry.arg >> 2) & 0x1));
+        case 2: {
+            const u32 temp = (entry.arg >> 3) & 0x3;
+            const auto arg = *(MaxwellDMA::LaunchDMA::SemaphoreType*)(&temp);
+            switch (arg) {
+            case MaxwellDMA::LaunchDMA::SemaphoreType::NONE:
+                return "NONE";
+            case MaxwellDMA::LaunchDMA::SemaphoreType::RELEASE_ONE_WORD_SEMAPHORE:
+                return "RELEASE_ONE_WORD_SEMAPHORE";
+            case MaxwellDMA::LaunchDMA::SemaphoreType::RELEASE_FOUR_WORD_SEMAPHORE:
+                return "RELEASE_FOUR_WORD_SEMAPHORE";
+            }
+            break;
+        }
+        case 3: {
+            const u32 temp = (entry.arg >> 5) & 0x3;
+            const auto arg = *(MaxwellDMA::LaunchDMA::InterruptType*)(&temp);
+            switch (arg) {
+            case MaxwellDMA::LaunchDMA::InterruptType::NONE:
+                return "NONE";
+            case MaxwellDMA::LaunchDMA::InterruptType::BLOCKING:
+                return "BLOCKING";
+            case MaxwellDMA::LaunchDMA::InterruptType::NON_BLOCKING:
+                return "NON_BLOCKING";
+            }
+            break;
+        }
+        case 4:
+        case 5: {
+            u32 temp;
+            if (i == 4) {
+                temp = (entry.arg >> 7) & 0x1;
+            } else {
+                temp = (entry.arg >> 8) & 0x1;
+            }
+            const auto arg = *(MaxwellDMA::LaunchDMA::MemoryLayout*)(&temp);
+            switch (arg) {
+            case MaxwellDMA::LaunchDMA::MemoryLayout::BLOCKLINEAR:
+                return "BLOCKLINEAR";
+            case MaxwellDMA::LaunchDMA::MemoryLayout::PITCH:
+                return "PITCH";
+            }
+            break;
+        }
+        case 6:
+            return fmt::format("{}", static_cast<bool>((entry.arg >> 9) & 0x1));
+        case 7:
+            return fmt::format("{}", static_cast<bool>((entry.arg >> 10) & 0x1));
+        case 8:
+            return fmt::format("{}", static_cast<bool>((entry.arg >> 11) & 0x1));
+        case 9:
+        case 10: {
+            u32 temp;
+            if (i == 9) {
+                temp = (entry.arg >> 12) & 0x1;
+            } else {
+                temp = (entry.arg >> 13) & 0x1;
+            }
+            const auto arg = *(MaxwellDMA::LaunchDMA::Type*)(&temp);
+            switch (arg) {
+            case MaxwellDMA::LaunchDMA::Type::VIRTUAL:
+                return "VIRTUAL";
+            case MaxwellDMA::LaunchDMA::Type::PHYSICAL:
+                return "PHYSICAL";
+            }
+            break;
+        }
+        case 11: {
+            const u32 temp = (entry.arg >> 14) & 0xF;
+            const auto arg = *(MaxwellDMA::LaunchDMA::SemaphoreReduction*)(&temp);
+            switch (arg) {
+            case MaxwellDMA::LaunchDMA::SemaphoreReduction::IMIN:
+                return "IMIN";
+            case MaxwellDMA::LaunchDMA::SemaphoreReduction::IMAX:
+                return "IMAX";
+            case MaxwellDMA::LaunchDMA::SemaphoreReduction::IXOR:
+                return "IXOR";
+            case MaxwellDMA::LaunchDMA::SemaphoreReduction::IAND:
+                return "IAND";
+            case MaxwellDMA::LaunchDMA::SemaphoreReduction::IOR:
+                return "IOR";
+            case MaxwellDMA::LaunchDMA::SemaphoreReduction::IADD:
+                return "IADD";
+            case MaxwellDMA::LaunchDMA::SemaphoreReduction::INC:
+                return "INC";
+            case MaxwellDMA::LaunchDMA::SemaphoreReduction::DEC:
+                return "DEC";
+            case MaxwellDMA::LaunchDMA::SemaphoreReduction::FADD:
+                return "FADD";
+            }
+            break;
+        }
+        case 12: {
+            const u32 temp = (entry.arg >> 18) & 0x1;
+            const auto arg = *(MaxwellDMA::LaunchDMA::SemaphoreReductionSign*)(&temp);
+            switch (arg) {
+            case MaxwellDMA::LaunchDMA::SemaphoreReductionSign::SIGNED:
+                return "SIGNED";
+            case MaxwellDMA::LaunchDMA::SemaphoreReductionSign::UNSIGNED:
+                return "UNSIGNED";
+            }
+            break;
+        }
+        case 13:
+            return fmt::format("{}", static_cast<bool>((entry.arg >> 20) & 0x1));
+        case 14: {
+            const u32 temp = (entry.arg >> 18) & 0x1;
+            const auto arg = *(MaxwellDMA::LaunchDMA::BypassL2*)(&temp);
+            switch (arg) {
+            case MaxwellDMA::LaunchDMA::BypassL2::USE_PTE_SETTING:
+                return "USE_PTE_SETTING";
+            case MaxwellDMA::LaunchDMA::BypassL2::FORCE_VOLATILE:
+                return "FORCE_VOLATILE";
+            }
+            break;
+        }
+        }
+        break;
+    }
+
+    case REG(remap_const.dst_x): {
+        switch (i) {
+        case 0:
+        case 1:
+        case 2:
+        case 3: {
+            u32 temp;
+            if (i == 0) {
+                temp = entry.arg & 0x7;
+            } else if (i == 1) {
+                temp = (entry.arg >> 4) & 0x7;
+            } else if (i == 2) {
+                temp = (entry.arg >> 8) & 0x7;
+            } else if (i == 3) {
+                temp = (entry.arg >> 12) & 0x7;
+            }
+            const auto arg = *(MaxwellDMA::RemapConst::Swizzle*)(&temp);
+            switch (arg) {
+            case MaxwellDMA::RemapConst::Swizzle::SRC_X:
+                return "SRC_X";
+            case MaxwellDMA::RemapConst::Swizzle::SRC_Y:
+                return "SRC_Y";
+            case MaxwellDMA::RemapConst::Swizzle::SRC_Z:
+                return "SRC_Z";
+            case MaxwellDMA::RemapConst::Swizzle::SRC_W:
+                return "SRC_W";
+            case MaxwellDMA::RemapConst::Swizzle::CONST_A:
+                return "CONST_A";
+            case MaxwellDMA::RemapConst::Swizzle::CONST_B:
+                return "CONST_B";
+            case MaxwellDMA::RemapConst::Swizzle::NO_WRITE:
+                return "NO_WRITE";
+            }
+            break;
+        }
+        case 4:
+            return fmt::format("{}", (entry.arg >> 16) & 0x3);
+        case 5:
+            return fmt::format("{}", (entry.arg >> 20) & 0x3);
+        case 6:
+            return fmt::format("{}", (entry.arg >> 24) & 0x3);
+        }
+        break;
+    }
+
+    case REG(dst_params.block_size):
+    case REG(src_params.block_size): {
+        switch (i) {
+        case 0: {
+            switch (entry.arg & 0xF) {
+            case 0:
+                return "OneGob";
+            case 14:
+                return "QuarterGob";
+            }
+            break;
+        }
+        case 1:
+        case 2: {
+            u32 arg;
+            if (i == 1) {
+                arg = (entry.arg >> 4) & 0xF;
+            } else {
+                arg = (entry.arg >> 8) & 0xF;
+            }
+            switch (arg) {
+            case 0:
+                return "OneGob";
+            case 1:
+                return "TwoGob";
+            case 2:
+                return "FourGob";
+            case 3:
+                return "EightGob";
+            case 4:
+                return "SixteenGob";
+            case 5:
+                return "ThirtyTwoGob";
+            }
+            break;
+        }
+        case 3: {
+            u32 arg = (entry.arg >> 12) & 0xF;
+            switch (arg) {
+            case 0:
+                return "Tesla4";
+            case 1:
+                return "Fermi8";
+            }
+            break;
+        }
+        }
+        break;
+    }
+
+    case REG(dst_params.width):
+    case REG(dst_params.height):
+    case REG(dst_params.depth):
+    case REG(dst_params.layer):
+
+    case REG(src_params.width):
+    case REG(src_params.height):
+    case REG(src_params.depth):
+    case REG(src_params.layer):
+        return fmt::format("{}", entry.arg);
+    case REG(dst_params.origin):
+    case REG(src_params.origin): {
+        switch (i) {
+        case 0:
+            return fmt::format("{}", entry.arg & 0xFFFF);
+        case 1:
+            return fmt::format("{}", (entry.arg >> 16) & 0xFFFF);
+        }
+        break;
+    }
+    }
+
+    return fmt::format("0x{:X}", entry.arg);
 }
+#undef REG
 
 [[nodiscard]] static constexpr REG_LIST BuildFermiMethods() {
     return {{
@@ -2234,15 +2657,144 @@ std::string Record::GetMaxwellDMAArg(GPU::RecordEntry& entry, REG_LIST::const_it
 }
 
 [[nodiscard]] static constexpr REG_LIST BuildKeplerComputeMethods() {
-    return {};
+    return {{
+        {0x0000, 0x60, 0x01, 0x0000, 0x01, 0x01, "unk_0000(OFFSET)"},
+        {0x0060, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.line_length_in"},
+        {0x0061, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.line_count"},
+        {0x0062, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.address_high"},
+        {0x0063, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.address_low"},
+        {0x0064, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.pitch"},
+        {0x0065, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.block_width"},
+        {0x0065, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.block_height"},
+        {0x0065, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.block_depth"},
+        {0x0066, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.width"},
+        {0x0067, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.height"},
+        {0x0068, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.depth"},
+        {0x0069, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.z"},
+        {0x006A, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.x"},
+        {0x006B, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.y"},
+        {0x006C, 0x01, 0x01, 0x006C, 0x01, 0x01, "exec_upload.linear"},
+        {0x006D, 0x01, 0x01, 0x006D, 0x01, 0x01, "data_upload"},
+        {0x006E, 0x3F, 0x01, 0x006E, 0x01, 0x01, "unk_006E(OFFSET)"},
+        {0x00AD, 0x01, 0x01, 0x00AD, 0x01, 0x01, "launch_desc_loc.address"},
+        {0x00AE, 0x01, 0x01, 0x00AE, 0x01, 0x01, "unk_00AE(OFFSET)"},
+        {0x00AF, 0x01, 0x01, 0x00AF, 0x01, 0x01, "launch"},
+        {0x00B0, 0x4A7, 0x01, 0x00B0, 0x01, 0x01, "unk_00B0(OFFSET)"},
+        {0x0557, 0x01, 0x01, 0x0557, 0x01, 0x03, "tsc.address_high"},
+        {0x0558, 0x01, 0x01, 0x0557, 0x01, 0x03, "tsc.address_low"},
+        {0x0559, 0x01, 0x01, 0x0557, 0x01, 0x03, "tsc.limit"},
+        {0x055A, 0x03, 0x01, 0x055A, 0x01, 0x01, "unk_055A(OFFSET)"},
+        {0x055D, 0x01, 0x01, 0x055D, 0x01, 0x03, "tic.address_high"},
+        {0x055E, 0x01, 0x01, 0x055D, 0x01, 0x03, "tic.address_low"},
+        {0x055F, 0x01, 0x01, 0x055D, 0x01, 0x03, "tic.limit"},
+        {0x0560, 0x22, 0x01, 0x0560, 0x01, 0x01, "unk_0560(OFFSET)"},
+        {0x0582, 0x01, 0x01, 0x0582, 0x01, 0x02, "code_loc.address_high"},
+        {0x0583, 0x01, 0x01, 0x0582, 0x01, 0x02, "code_loc.address_low"},
+        {0x0584, 0x3FE, 0x01, 0x0584, 0x01, 0x01, "unk_0584(OFFSET)"},
+        {0x0982, 0x01, 0x01, 0x0982, 0x01, 0x01, "tex_cb_index"},
+        {0x0983, 0x375, 0x01, 0x0983, 0x01, 0x01, "unk_0983(OFFSET)"},
+    }};
 }
 
 [[nodiscard]] static constexpr REG_LIST BuildKeplerMemoryMethods() {
-    return {};
+    return {{
+        {0x0000, 0x60, 0x01, 0x0000, 0x01, 0x01, "unk_0000(OFFSET)"},
+        {0x0060, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.line_length_in"},
+        {0x0061, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.line_count"},
+        {0x0062, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.address_high"},
+        {0x0063, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.address_low"},
+        {0x0064, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.pitch"},
+        {0x0065, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.block_width"},
+        {0x0065, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.block_height"},
+        {0x0065, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.block_depth"},
+        {0x0066, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.width"},
+        {0x0067, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.height"},
+        {0x0068, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.depth"},
+        {0x0069, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.z"},
+        {0x006A, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.x"},
+        {0x006B, 0x01, 0x01, 0x0060, 0x01, 0x0C, "upload.dest.y"},
+        {0x006C, 0x01, 0x01, 0x006C, 0x01, 0x01, "exec.linear"},
+        {0x006D, 0x01, 0x01, 0x006D, 0x01, 0x01, "data"},
+        {0x006E, 0x11, 0x01, 0x006E, 0x01, 0x01, "unk_006E(OFFSET)"},
+    }};
 }
 
 [[nodiscard]] static constexpr REG_LIST BuildMaxwellDMAMethods() {
-    return {};
+    return {{
+        {0x0000, 0x40, 0x01, 0x0000, 0x01, 0x01, "reserved(OFFSET)"},
+        {0x0040, 0x01, 0x01, 0x0040, 0x01, 0x01, "nop"},
+        {0x0041, 0x0F, 0x01, 0x0041, 0x01, 0x01, "reserved01(OFFSET)"},
+        {0x0050, 0x01, 0x01, 0x0050, 0x01, 0x01, "pm_trigger"},
+        {0x0051, 0x3F, 0x01, 0x0051, 0x01, 0x01, "reserved02(OFFSET)"},
+        {0x0090, 0x01, 0x01, 0x0090, 0x01, 0x03, "semaphore.address.upper"},
+        {0x0091, 0x01, 0x01, 0x0090, 0x01, 0x03, "semaphore.address.lower"},
+        {0x0092, 0x01, 0x01, 0x0090, 0x01, 0x03, "semaphore.payload"},
+        {0x0093, 0x02, 0x01, 0x0093, 0x01, 0x01, "reserved03(OFFSET)"},
+        {0x0095, 0x01, 0x01, 0x0095, 0x01, 0x03, "render_enable.address.upper"},
+        {0x0096, 0x01, 0x01, 0x0095, 0x01, 0x03, "render_enable.address.lower"},
+        {0x0097, 0x01, 0x01, 0x0095, 0x01, 0x03, "render_enable.mode"},
+        {0x0098, 0x01, 0x01, 0x0098, 0x01, 0x01, "src_phys_mode"},
+        {0x0099, 0x01, 0x01, 0x0099, 0x01, 0x01, "dst_phys_mode"},
+        {0x009A, 0x26, 0x01, 0x009A, 0x01, 0x01, "reserved04(OFFSET)"},
+        {0x00C0, 0x01, 0x01, 0x00C0, 0x01, 0x01, "launch_dma.data_transfer_type"},
+        {0x00C0, 0x01, 0x01, 0x00C0, 0x01, 0x01, "launch_dma.flush_enable"},
+        {0x00C0, 0x01, 0x01, 0x00C0, 0x01, 0x01, "launch_dma.semaphore_type"},
+        {0x00C0, 0x01, 0x01, 0x00C0, 0x01, 0x01, "launch_dma.interrupt_type"},
+        {0x00C0, 0x01, 0x01, 0x00C0, 0x01, 0x01, "launch_dma.src_memory_layout"},
+        {0x00C0, 0x01, 0x01, 0x00C0, 0x01, 0x01, "launch_dma.dst_memory_layout"},
+        {0x00C0, 0x01, 0x01, 0x00C0, 0x01, 0x01, "launch_dma.multi_line_enable"},
+        {0x00C0, 0x01, 0x01, 0x00C0, 0x01, 0x01, "launch_dma.remap_enable"},
+        {0x00C0, 0x01, 0x01, 0x00C0, 0x01, 0x01, "launch_dma.rmwdisable"},
+        {0x00C0, 0x01, 0x01, 0x00C0, 0x01, 0x01, "launch_dma.src_type"},
+        {0x00C0, 0x01, 0x01, 0x00C0, 0x01, 0x01, "launch_dma.dst_type"},
+        {0x00C0, 0x01, 0x01, 0x00C0, 0x01, 0x01, "launch_dma.semaphore_reduction"},
+        {0x00C0, 0x01, 0x01, 0x00C0, 0x01, 0x01, "launch_dma.semaphore_reduction_sign"},
+        {0x00C0, 0x01, 0x01, 0x00C0, 0x01, 0x01, "launch_dma.reduction_enable"},
+        {0x00C0, 0x01, 0x01, 0x00C0, 0x01, 0x01, "launch_dma.bypass_l2"},
+        {0x00C1, 0x3F, 0x01, 0x00C1, 0x01, 0x01, "reserved05(OFFSET)"},
+        {0x0100, 0x01, 0x01, 0x0100, 0x01, 0x02, "offset_in.address.upper"},
+        {0x0101, 0x01, 0x01, 0x0100, 0x01, 0x02, "offset_in.address.lower"},
+        {0x0102, 0x01, 0x01, 0x0102, 0x01, 0x02, "offset_out.address.upper"},
+        {0x0103, 0x01, 0x01, 0x0102, 0x01, 0x02, "offset_out.address.lower"},
+        {0x0104, 0x01, 0x01, 0x0104, 0x01, 0x01, "pitch_in"},
+        {0x0105, 0x01, 0x01, 0x0105, 0x01, 0x01, "pitch_out"},
+        {0x0106, 0x01, 0x01, 0x0106, 0x01, 0x01, "line_length_in"},
+        {0x0107, 0x01, 0x01, 0x0107, 0x01, 0x01, "line_count"},
+        {0x0108, 0xB8, 0x01, 0x0108, 0x01, 0x01, "reserved06(OFFSET)"},
+        {0x01C0, 0x01, 0x01, 0x01C0, 0x01, 0x03, "remap_const.address.upper"},
+        {0x01C1, 0x01, 0x01, 0x01C0, 0x01, 0x03, "remap_const.address.lower"},
+        {0x01C2, 0x01, 0x01, 0x01C0, 0x01, 0x03, "remap_const.dst_x"},
+        {0x01C2, 0x01, 0x01, 0x01C0, 0x01, 0x03, "remap_const.dst_y"},
+        {0x01C2, 0x01, 0x01, 0x01C0, 0x01, 0x03, "remap_const.dst_z"},
+        {0x01C2, 0x01, 0x01, 0x01C0, 0x01, 0x03, "remap_const.dst_w"},
+        {0x01C2, 0x01, 0x01, 0x01C0, 0x01, 0x03, "remap_const.component_size_minus_one"},
+        {0x01C2, 0x01, 0x01, 0x01C0, 0x01, 0x03, "remap_const.num_src_components_minus_one"},
+        {0x01C2, 0x01, 0x01, 0x01C0, 0x01, 0x03, "remap_const.num_dst_components_minus_one"},
+        {0x01C3, 0x01, 0x01, 0x01C3, 0x01, 0x06, "dst_params.block_size.width"},
+        {0x01C3, 0x01, 0x01, 0x01C3, 0x01, 0x06, "dst_params.block_size.height"},
+        {0x01C3, 0x01, 0x01, 0x01C3, 0x01, 0x06, "dst_params.block_size.depth"},
+        {0x01C3, 0x01, 0x01, 0x01C3, 0x01, 0x06, "dst_params.block_size.gob_height"},
+        {0x01C4, 0x01, 0x01, 0x01C3, 0x01, 0x06, "dst_params.width"},
+        {0x01C5, 0x01, 0x01, 0x01C3, 0x01, 0x06, "dst_params.height"},
+        {0x01C6, 0x01, 0x01, 0x01C3, 0x01, 0x06, "dst_params.depth"},
+        {0x01C7, 0x01, 0x01, 0x01C3, 0x01, 0x06, "dst_params.layer"},
+        {0x01C8, 0x01, 0x01, 0x01C3, 0x01, 0x06, "dst_params.origin.x"},
+        {0x01C8, 0x01, 0x01, 0x01C3, 0x01, 0x06, "dst_params.origin.y"},
+        {0x01C9, 0x01, 0x01, 0x01C9, 0x01, 0x01, "reserved07(OFFSET)"},
+        {0x01CA, 0x01, 0x01, 0x01CA, 0x01, 0x06, "src_params.block_size.width"},
+        {0x01CA, 0x01, 0x01, 0x01CA, 0x01, 0x06, "src_params.block_size.height"},
+        {0x01CA, 0x01, 0x01, 0x01CA, 0x01, 0x06, "src_params.block_size.depth"},
+        {0x01CA, 0x01, 0x01, 0x01CA, 0x01, 0x06, "src_params.block_size.gob_height"},
+        {0x01CB, 0x01, 0x01, 0x01CA, 0x01, 0x06, "src_params.width"},
+        {0x01CC, 0x01, 0x01, 0x01CA, 0x01, 0x06, "src_params.height"},
+        {0x01CD, 0x01, 0x01, 0x01CA, 0x01, 0x06, "src_params.depth"},
+        {0x01CE, 0x01, 0x01, 0x01CA, 0x01, 0x06, "src_params.layer"},
+        {0x01CF, 0x01, 0x01, 0x01CA, 0x01, 0x06, "src_params.origin.x"},
+        {0x01CF, 0x01, 0x01, 0x01CA, 0x01, 0x06, "src_params.origin.y"},
+        {0x01D0, 0x275, 0x01, 0x01D0, 0x01, 0x01, "reserved08(OFFSET)"},
+        {0x0445, 0x01, 0x01, 0x0445, 0x01, 0x01, "pm_trigger_end"},
+        {0x0446, 0x3BA, 0x01, 0x0446, 0x01, 0x01, "reserved09(OFFSET)"},
+    }};
 }
 
 static constexpr REG_LIST METHODS_FERMI{BuildFermiMethods()};
@@ -2317,7 +2869,8 @@ std::vector<std::string> Record::GetMethodNames(GPU::RecordEntry& entry,
                                                 bool is_prev_state) {
     std::vector<std::string> methods_found;
 
-    if (is_prev_state && start_it->name.starts_with("unk")) {
+    if (is_prev_state &&
+        (start_it->name.starts_with("unk") || start_it->name.starts_with("reserved"))) {
         return methods_found;
     }
 
@@ -2353,6 +2906,35 @@ std::vector<std::string> Record::GetMethodNames(GPU::RecordEntry& entry,
         ++start_it;
     }
     return methods_found;
+}
+
+RENDERDOC_API_1_4_1* SetupRenderdoc() {
+#ifdef _WIN32
+    auto renderDoc = GetModuleHandleA("renderdoc.dll");
+    if (!renderDoc) {
+        return nullptr;
+    }
+    pRENDERDOC_GetAPI renderDoc_getapi =
+        (pRENDERDOC_GetAPI)GetProcAddress(renderDoc, "RENDERDOC_GetAPI");
+    if (!renderDoc_getapi) {
+        return nullptr;
+    }
+    RENDERDOC_API_1_4_1* renderdoc_api = new RENDERDOC_API_1_4_1;
+    int ret = renderDoc_getapi(eRENDERDOC_API_Version_1_4_1, (void**)&renderdoc_api);
+    if (ret == 0) {
+        return nullptr;
+    }
+#endif
+
+    return renderdoc_api;
+}
+static RENDERDOC_API_1_4_1* renderdoc_api = SetupRenderdoc();
+
+void Record::CaptureFrames(u32 num) {
+    if (!renderdoc_api || !renderdoc_api->IsTargetControlConnected()) {
+        return;
+    }
+    renderdoc_api->TriggerMultiFrameCapture(1);
 }
 
 } // namespace Tegra

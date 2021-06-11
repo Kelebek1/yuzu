@@ -13,6 +13,7 @@
 #include "video_core/rasterizer_interface.h"
 #include "video_core/renderer_base.h"
 #include "video_core/textures/decoders.h"
+#include "video_core/record.h"
 
 namespace Tegra::Engines {
 
@@ -28,6 +29,17 @@ void KeplerCompute::BindRasterizer(VideoCore::RasterizerInterface* rasterizer_) 
 void KeplerCompute::CallMethod(u32 method, u32 method_argument, bool is_last_call) {
     ASSERT_MSG(method < Regs::NUM_REGS,
                "Invalid KeplerCompute register, increase the size of the Regs structure");
+
+    if constexpr (Tegra::Record::RECORD_ENGINE[Tegra::Record::GetEngineIndex(
+                      EngineID::KEPLER_COMPUTE_B)]) {
+        auto& gpu = system.GetInstance().GPU();
+        std::scoped_lock lock{gpu.record_mutex};
+        if (gpu.CURRENTLY_RECORDING) {
+            gpu.METHODS_CALLED.emplace_back(EngineID::KEPLER_COMPUTE_B, method, method_argument,
+                                            std::chrono::high_resolution_clock::now(),
+                                            gpu.RECORD_DRAW);
+        }
+    }
 
     regs.reg_array[method] = method_argument;
 

@@ -100,6 +100,7 @@ void Load(VkDevice device, DeviceDispatch& dld) noexcept {
     X(vkCmdEndRenderPass);
     X(vkCmdEndTransformFeedbackEXT);
     X(vkCmdEndDebugUtilsLabelEXT);
+    X(vkCmdInsertDebugUtilsLabelEXT);
     X(vkCmdFillBuffer);
     X(vkCmdPipelineBarrier);
     X(vkCmdPushConstants);

@@ -215,6 +215,7 @@ struct DeviceDispatch : InstanceDispatch {
     PFN_vkCmdEndRenderPass vkCmdEndRenderPass{};
     PFN_vkCmdEndTransformFeedbackEXT vkCmdEndTransformFeedbackEXT{};
     PFN_vkCmdEndDebugUtilsLabelEXT vkCmdEndDebugUtilsLabelEXT{};
+    PFN_vkCmdInsertDebugUtilsLabelEXT vkCmdInsertDebugUtilsLabelEXT{};
     PFN_vkCmdFillBuffer vkCmdFillBuffer{};
     PFN_vkCmdPipelineBarrier vkCmdPipelineBarrier{};
     PFN_vkCmdPushConstants vkCmdPushConstants{};
@@ -1235,6 +1236,16 @@ public:
 
     void EndDebugUtilsLabelEXT() const noexcept {
         dld->vkCmdEndDebugUtilsLabelEXT(handle);
+    }
+
+    void InsertDebugUtilsLabelEXT(const char* label, std::span<float, 4> color) const noexcept {
+        const VkDebugUtilsLabelEXT label_info{
+            .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT,
+            .pNext = nullptr,
+            .pLabelName = label,
+            .color{color[0], color[1], color[2], color[3]},
+        };
+        dld->vkCmdInsertDebugUtilsLabelEXT(handle, &label_info);
     }
 
 private:

@@ -320,10 +320,9 @@ void RasterizerVulkan::Draw(bool is_indexed, bool is_instanced) {
 
     EndTransformFeedback();
 
-    if constexpr (Tegra::Record::RECORD_ENGINE[Tegra::Record::GetEngineIndex(
-                      Tegra::EngineID::MAXWELL_B)]) {
-        if (gpu.CURRENTLY_RECORDING) {
-            gpu.RECORD_DRAW++;
+    if constexpr (Tegra::Record::DO_RECORD) {
+        if (gpu.CURRENTLY_RECORDING || device.HasDebuggingToolAttached()) {
+            Tegra::Record::OutputMarker(&gpu, &scheduler);
         }
     }
 }
@@ -399,6 +398,12 @@ void RasterizerVulkan::Clear() {
         attachment.clearValue.depthStencil.stencil = clear_stencil;
         cmdbuf.ClearAttachments(attachment, clear_rect);
     });
+
+    if constexpr (Tegra::Record::DO_RECORD) {
+        if (gpu.CURRENTLY_RECORDING || device.HasDebuggingToolAttached()) {
+            Tegra::Record::OutputMarker(&gpu, &scheduler);
+        }
+    }
 }
 
 void RasterizerVulkan::DispatchCompute(GPUVAddr code_addr) {
@@ -644,6 +649,11 @@ void RasterizerVulkan::TickFrame() {
 bool RasterizerVulkan::AccelerateSurfaceCopy(const Tegra::Engines::Fermi2D::Surface& src,
                                              const Tegra::Engines::Fermi2D::Surface& dst,
                                              const Tegra::Engines::Fermi2D::Config& copy_config) {
+    if constexpr (Tegra::Record::DO_RECORD) {
+        if (gpu.CURRENTLY_RECORDING || device.HasDebuggingToolAttached()) {
+            Tegra::Record::OutputMarker(&gpu, &scheduler);
+        }
+    }
     std::scoped_lock lock{texture_cache.mutex};
     texture_cache.BlitImage(dst, src, copy_config);
     return true;

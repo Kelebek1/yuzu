@@ -13,6 +13,13 @@
 #include "video_core/engines/maxwell_dma.h"
 #include "video_core/gpu.h"
 
+namespace Vulkan {
+class VKScheduler;
+namespace vk {
+class Instance;
+}
+}
+
 namespace Tegra {
 
 class Record {
@@ -21,9 +28,9 @@ public:
     static constexpr std::array<bool, 5> RECORD_ENGINE{
         true, // FERMI_TWOD_A
         true,  // MAXWELL_B
-        false, // KEPLER_COMPUTE_B
-        false, // KEPLER_INLINE_TO_MEMORY_B
-        false  // MAXWELL_DMA_COPY_A
+        true, // KEPLER_COMPUTE_B
+        true, // KEPLER_INLINE_TO_MEMORY_B
+        true  // MAXWELL_DMA_COPY_A
     };
     static constexpr bool DO_RECORD =
         std::any_of(RECORD_ENGINE.begin(), RECORD_ENGINE.end(), [](bool active) { return active; });
@@ -71,7 +78,7 @@ public:
         case EngineID::MAXWELL_B:
             return "MAXWELL";
         case EngineID::MAXWELL_DMA_COPY_A:
-            return "MAXWDMA";
+            return "MAXDMA";
         }
         UNREACHABLE();
         return "Unknown";
@@ -95,7 +102,8 @@ public:
     };
 
     static void BuildResults(Tegra::GPU* gpu, size_t frame);
-    static void OutputMarkerOGL(Tegra::GPU* gpu);
+    static void OutputMarker(Tegra::GPU* gpu, Vulkan::VKScheduler* scheduler = nullptr);
+    static void CaptureFrames(u32 num = 1);
 
     [[nodiscard]] static std::vector<std::string> GetMethodNames(
         GPU::RecordEntry& entry, std::array<Method, 400>::const_iterator start_it,

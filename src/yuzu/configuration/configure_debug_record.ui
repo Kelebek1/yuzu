@@ -319,6 +319,28 @@
     <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
    </property>
   </widget>
+  <widget class="QCheckBox" name="checkBox_hide_unk">
+   <property name="geometry">
+    <rect>
+     <x>340</x>
+     <y>620</y>
+     <width>121</width>
+     <height>17</height>
+    </rect>
+   </property>
+   <property name="sizePolicy">
+    <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+     <horstretch>0</horstretch>
+     <verstretch>0</verstretch>
+    </sizepolicy>
+   </property>
+   <property name="focusPolicy">
+    <enum>Qt::NoFocus</enum>
+   </property>
+   <property name="text">
+    <string>Hide unknown regs</string>
+   </property>
+  </widget>
  </widget>
  <resources/>
  <connections/>

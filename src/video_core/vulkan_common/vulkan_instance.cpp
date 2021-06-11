@@ -15,6 +15,7 @@
 #include "core/frontend/emu_window.h"
 #include "video_core/vulkan_common/vulkan_instance.h"
 #include "video_core/vulkan_common/vulkan_wrapper.h"
+#include "video_core/record.h"
 
 // Include these late to avoid polluting previous headers
 #ifdef _WIN32
