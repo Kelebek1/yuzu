@@ -170,6 +170,12 @@ public:
     /// Tick pending requests within the GPU.
     void TickWork();
 
+    /// Returns a reference to the Fermi2D GPU engine.
+    [[nodiscard]] Engines::Fermi2D& Fermi2D();
+
+    /// Returns a reference to the Fermi2D GPU engine.
+    [[nodiscard]] const Engines::Fermi2D& Fermi2D() const;
+
     /// Returns a reference to the Maxwell3D GPU engine.
     [[nodiscard]] Engines::Maxwell3D& Maxwell3D();
 
@@ -181,6 +187,18 @@ public:
 
     /// Returns a reference to the KeplerCompute GPU engine.
     [[nodiscard]] const Engines::KeplerCompute& KeplerCompute() const;
+
+    /// Returns a reference to the KeplerMemory GPU engine.
+    [[nodiscard]] Engines::KeplerMemory& KeplerMemory();
+
+    /// Returns a reference to the Fermi2D GPU engine.
+    [[nodiscard]] const Engines::KeplerMemory& KeplerMemory() const;
+
+    /// Returns a reference to the Fermi2D GPU engine.
+    [[nodiscard]] Engines::MaxwellDMA& MaxwellDMA();
+
+    /// Returns a reference to the Fermi2D GPU engine.
+    [[nodiscard]] const Engines::MaxwellDMA& MaxwellDMA() const;
 
     /// Returns a reference to the GPU memory manager.
     [[nodiscard]] Tegra::MemoryManager& MemoryManager();
@@ -357,17 +375,19 @@ public:
         u32 draw;
     };
     std::atomic<bool> CURRENTLY_RECORDING = false;
-    std::atomic<u32> RECORD_DRAW = 0;
+    u32 RECORD_FRAMES = 0;
+    u32 RECORD_DRAW = 0;
     std::array<std::unordered_map<u32, RecordEntry>, 5> RECORD_OLD_REGS;
     std::chrono::time_point<std::chrono::high_resolution_clock> RECORD_TIME_ORIGIN;
     std::vector<RecordEntry> METHODS_CALLED;
+    std::vector<u32> RECORDED_FRAMES;
     std::mutex record_mutex;
     /// Draw results, made up of each method, and each argument for each method (unions have each
     /// member)
-    std::vector<DrawResult> RECORD_RESULTS_CHANGED;
+    std::vector<std::vector<DrawResult>> RECORD_RESULTS_CHANGED;
     /// Draw state unmodified by this frame, contains each method, and each argument for each method
     /// (unions have each member)
-    std::vector<DrawResult> RECORD_RESULTS_UNCHANGED;
+    std::vector<std::vector<DrawResult>> RECORD_RESULTS_UNCHANGED;
 
 protected:
     void TriggerCpuInterrupt(u32 syncpoint_id, u32 value) const;

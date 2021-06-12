@@ -21,10 +21,10 @@
 #include "video_core/engines/maxwell_dma.h"
 #include "video_core/gpu.h"
 #include "video_core/memory_manager.h"
-#include "video_core/record.h"
 #include "video_core/renderer_base.h"
 #include "video_core/shader_notify.h"
 #include "video_core/video_core.h"
+#include "video_core/record.h"
 
 namespace Tegra {
 
@@ -53,6 +53,14 @@ void GPU::BindRenderer(std::unique_ptr<VideoCore::RendererBase> renderer_) {
     kepler_compute->BindRasterizer(rasterizer);
 }
 
+Engines::Fermi2D& GPU::Fermi2D() {
+    return *fermi_2d;
+}
+
+const Engines::Fermi2D& GPU::Fermi2D() const {
+    return *fermi_2d;
+}
+
 Engines::Maxwell3D& GPU::Maxwell3D() {
     return *maxwell_3d;
 }
@@ -67,6 +75,22 @@ Engines::KeplerCompute& GPU::KeplerCompute() {
 
 const Engines::KeplerCompute& GPU::KeplerCompute() const {
     return *kepler_compute;
+}
+
+Engines::KeplerMemory& GPU::KeplerMemory() {
+    return *kepler_memory;
+}
+
+const Engines::KeplerMemory& GPU::KeplerMemory() const {
+    return *kepler_memory;
+}
+
+Engines::MaxwellDMA& GPU::MaxwellDMA() {
+    return *maxwell_dma;
+}
+
+const Engines::MaxwellDMA& GPU::MaxwellDMA() const {
+    return *maxwell_dma;
 }
 
 MemoryManager& GPU::MemoryManager() {
@@ -510,82 +534,6 @@ void GPU::ClearCdmaInstance() {
 
 void GPU::SwapBuffers(const Tegra::FramebufferConfig* framebuffer) {
     gpu_thread.SwapBuffers(framebuffer);
-    if constexpr (Tegra::Record::DO_RECORD) {
-        std::scoped_lock lock{record_mutex};
-        if (CURRENTLY_RECORDING) {
-            Record::BuildResults(this, Renderer().GetCurrentFrame());
-            CURRENTLY_RECORDING = false;
-            METHODS_CALLED.clear();
-            for (auto& engine : RECORD_OLD_REGS) {
-                engine.clear();
-            }
-        } else if (Settings::values.pending_frame_record) {
-            RECORD_RESULTS_CHANGED.clear();
-            RECORD_RESULTS_UNCHANGED.clear();
-            for (u32 i = 0; i < RECORD_OLD_REGS.size(); ++i) {
-                if (!Record::RECORD_ENGINE[i]) {
-                    continue;
-                }
-                auto& engine = RECORD_OLD_REGS[i];
-                const auto fakeTime = std::chrono::high_resolution_clock::now();
-
-                switch (i) {
-                case 0: {
-                    engine.reserve(fermi_2d->regs.reg_array.size());
-                    for (u32 j = 0; j < fermi_2d->regs.reg_array.size(); ++j) {
-                        RecordEntry new_entry{EngineID::FERMI_TWOD_A, j,
-                                              fermi_2d->regs.reg_array[j],
-                                              fakeTime, 0};
-                        engine.insert({new_entry.method, new_entry});
-                    }
-                    break;
-                }
-                case 1: {
-                    engine.reserve(maxwell_3d->regs.reg_array.size());
-                    for (u32 j = 0; j < maxwell_3d->regs.reg_array.size(); ++j) {
-                        RecordEntry new_entry{EngineID::MAXWELL_B, j,
-                                              maxwell_3d->regs.reg_array[j], fakeTime, 0};
-                        engine.insert({new_entry.method, new_entry});
-                    }
-                    break;
-                }
-                case 2: {
-                    engine.reserve(kepler_compute->regs.reg_array.size());
-                    for (u32 j = 0; j < kepler_compute->regs.reg_array.size(); ++j) {
-                        RecordEntry new_entry{EngineID::KEPLER_COMPUTE_B, j,
-                                              kepler_compute->regs.reg_array[j],
-                                              fakeTime, 0};
-                        engine.insert({new_entry.method, new_entry});
-                    }
-                    break;
-                }
-                case 3: {
-                    engine.reserve(kepler_memory->regs.reg_array.size());
-                    for (u32 j = 0; j < kepler_memory->regs.reg_array.size(); ++j) {
-                        RecordEntry new_entry{EngineID::KEPLER_INLINE_TO_MEMORY_B, j,
-                                              kepler_memory->regs.reg_array[j], fakeTime, 0};
-                        engine.insert({new_entry.method, new_entry});
-                    }
-                    break;
-                }
-                case 4: {
-                    engine.reserve(maxwell_dma->regs.reg_array.size());
-                    for (u32 j = 0; j < maxwell_dma->regs.reg_array.size(); ++j) {
-                        RecordEntry new_entry{EngineID::MAXWELL_DMA_COPY_A, j,
-                                              maxwell_dma->regs.reg_array[j], fakeTime, 0};
-                        engine.insert({new_entry.method, new_entry});
-                    }
-                    break;
-                }
-                }
-            }
-            CURRENTLY_RECORDING = true;
-            Settings::values.pending_frame_record = false;
-            RECORD_TIME_ORIGIN = std::chrono::high_resolution_clock::now();
-            Record::CaptureFrames();
-        }
-        RECORD_DRAW = 0;
-    }
 }
 
 void GPU::FlushRegion(VAddr addr, u64 size) {

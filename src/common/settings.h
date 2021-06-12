@@ -242,6 +242,9 @@ struct Values {
 
     // Debug
     std::atomic<bool> pending_frame_record = false;
+    u32 record_num_frames = 0;
+    std::atomic<bool> record_is_frame_stepping = false;
+    std::atomic<bool> record_has_frame_stepped = false;
 };
 
 extern Values values;

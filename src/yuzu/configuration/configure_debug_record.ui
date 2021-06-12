@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>1340</width>
-    <height>666</height>
+    <height>752</height>
    </rect>
   </property>
   <property name="focusPolicy">
@@ -19,22 +19,22 @@
   <widget class="QPushButton" name="do_capture">
    <property name="geometry">
     <rect>
-     <x>10</x>
-     <y>620</y>
+     <x>440</x>
+     <y>20</y>
      <width>151</width>
      <height>41</height>
     </rect>
    </property>
    <property name="text">
-    <string>Capture</string>
+    <string>Capture Frames</string>
    </property>
   </widget>
   <widget class="QPushButton" name="send_to_console">
    <property name="geometry">
     <rect>
-     <x>170</x>
-     <y>620</y>
-     <width>161</width>
+     <x>10</x>
+     <y>690</y>
+     <width>151</width>
      <height>41</height>
     </rect>
    </property>
@@ -42,27 +42,11 @@
     <string>Send To Console</string>
    </property>
   </widget>
-  <widget class="QListWidget" name="list_record_draws">
-   <property name="geometry">
-    <rect>
-     <x>10</x>
-     <y>30</y>
-     <width>151</width>
-     <height>581</height>
-    </rect>
-   </property>
-   <property name="sizePolicy">
-    <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-     <horstretch>0</horstretch>
-     <verstretch>0</verstretch>
-    </sizepolicy>
-   </property>
-  </widget>
   <widget class="QLabel" name="lbl_draws">
    <property name="geometry">
     <rect>
      <x>10</x>
-     <y>0</y>
+     <y>70</y>
      <width>151</width>
      <height>31</height>
     </rect>
@@ -83,7 +67,7 @@
    <property name="geometry">
     <rect>
      <x>170</x>
-     <y>0</y>
+     <y>70</y>
      <width>651</width>
      <height>31</height>
     </rect>
@@ -104,7 +88,7 @@
    <property name="geometry">
     <rect>
      <x>830</x>
-     <y>0</y>
+     <y>70</y>
      <width>501</width>
      <height>31</height>
     </rect>
@@ -124,8 +108,8 @@
   <widget class="QLabel" name="lbl_filter">
    <property name="geometry">
     <rect>
-     <x>550</x>
-     <y>620</y>
+     <x>540</x>
+     <y>690</y>
      <width>41</width>
      <height>31</height>
     </rect>
@@ -147,7 +131,7 @@
    <property name="geometry">
     <rect>
      <x>590</x>
-     <y>619</y>
+     <y>690</y>
      <width>231</width>
      <height>31</height>
     </rect>
@@ -157,7 +141,7 @@
    <property name="geometry">
     <rect>
      <x>170</x>
-     <y>30</y>
+     <y>100</y>
      <width>651</width>
      <height>581</height>
     </rect>
@@ -202,7 +186,7 @@
     <bool>false</bool>
    </attribute>
    <attribute name="verticalHeaderMinimumSectionSize">
-    <number>15</number>
+    <number>10</number>
    </attribute>
    <attribute name="verticalHeaderDefaultSectionSize">
     <number>15</number>
@@ -215,7 +199,7 @@
    <property name="geometry">
     <rect>
      <x>830</x>
-     <y>30</y>
+     <y>100</y>
      <width>501</width>
      <height>581</height>
     </rect>
@@ -254,10 +238,10 @@
     <bool>false</bool>
    </attribute>
    <attribute name="verticalHeaderMinimumSectionSize">
-    <number>15</number>
+    <number>10</number>
    </attribute>
    <attribute name="verticalHeaderDefaultSectionSize">
-    <number>15</number>
+    <number>10</number>
    </attribute>
    <attribute name="verticalHeaderHighlightSections">
     <bool>false</bool>
@@ -267,7 +251,7 @@
    <property name="geometry">
     <rect>
      <x>830</x>
-     <y>620</y>
+     <y>710</y>
      <width>251</width>
      <height>16</height>
     </rect>
@@ -295,7 +279,7 @@
    <property name="geometry">
     <rect>
      <x>830</x>
-     <y>640</y>
+     <y>690</y>
      <width>311</width>
      <height>16</height>
     </rect>
@@ -307,7 +291,7 @@
     </sizepolicy>
    </property>
    <property name="text">
-    <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Format: &amp;quot;&lt;span style=&quot; font-style:italic;&quot;&gt;tag&lt;/span&gt;:&lt;span style=&quot; font-style:italic;&quot;&gt;value&lt;/span&gt;&amp;quot;. Values without a tag is taken as a method.&lt;span style=&quot; font-style:italic;&quot;&gt;&lt;br/&gt;&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+    <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Format: &lt;span style=&quot; font-style:italic;&quot;&gt;tag&lt;/span&gt;:&lt;span style=&quot; font-style:italic;&quot;&gt;value&lt;/span&gt;. Values without a tag is taken as a method.&lt;span style=&quot; font-style:italic;&quot;&gt;&lt;br/&gt;&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
    </property>
    <property name="textFormat">
     <enum>Qt::AutoText</enum>
@@ -322,8 +306,8 @@
   <widget class="QCheckBox" name="checkBox_hide_unk">
    <property name="geometry">
     <rect>
-     <x>340</x>
-     <y>620</y>
+     <x>290</x>
+     <y>690</y>
      <width>121</width>
      <height>17</height>
     </rect>
@@ -340,6 +324,134 @@
    <property name="text">
     <string>Hide unknown regs</string>
    </property>
+  </widget>
+  <widget class="QPushButton" name="btn_Pause">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>20</y>
+     <width>151</width>
+     <height>41</height>
+    </rect>
+   </property>
+   <property name="sizePolicy">
+    <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+     <horstretch>0</horstretch>
+     <verstretch>0</verstretch>
+    </sizepolicy>
+   </property>
+   <property name="focusPolicy">
+    <enum>Qt::NoFocus</enum>
+   </property>
+   <property name="text">
+    <string>Pause</string>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="btn_StepFrame">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>20</y>
+     <width>151</width>
+     <height>41</height>
+    </rect>
+   </property>
+   <property name="sizePolicy">
+    <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+     <horstretch>0</horstretch>
+     <verstretch>0</verstretch>
+    </sizepolicy>
+   </property>
+   <property name="focusPolicy">
+    <enum>Qt::NoFocus</enum>
+   </property>
+   <property name="text">
+    <string>Step Frame</string>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="btn_Run">
+   <property name="geometry">
+    <rect>
+     <x>170</x>
+     <y>20</y>
+     <width>151</width>
+     <height>41</height>
+    </rect>
+   </property>
+   <property name="sizePolicy">
+    <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+     <horstretch>0</horstretch>
+     <verstretch>0</verstretch>
+    </sizepolicy>
+   </property>
+   <property name="focusPolicy">
+    <enum>Qt::NoFocus</enum>
+   </property>
+   <property name="text">
+    <string>Run</string>
+   </property>
+  </widget>
+  <widget class="QSpinBox" name="spin_numFrames">
+   <property name="geometry">
+    <rect>
+     <x>600</x>
+     <y>30</y>
+     <width>61</width>
+     <height>22</height>
+    </rect>
+   </property>
+   <property name="sizePolicy">
+    <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+     <horstretch>0</horstretch>
+     <verstretch>0</verstretch>
+    </sizepolicy>
+   </property>
+   <property name="focusPolicy">
+    <enum>Qt::NoFocus</enum>
+   </property>
+   <property name="frame">
+    <bool>true</bool>
+   </property>
+   <property name="alignment">
+    <set>Qt::AlignCenter</set>
+   </property>
+   <property name="minimum">
+    <number>1</number>
+   </property>
+  </widget>
+  <widget class="QTreeView" name="list_record_draws">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>100</y>
+     <width>151</width>
+     <height>581</height>
+    </rect>
+   </property>
+   <property name="sizePolicy">
+    <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+     <horstretch>0</horstretch>
+     <verstretch>0</verstretch>
+    </sizepolicy>
+   </property>
+   <property name="focusPolicy">
+    <enum>Qt::NoFocus</enum>
+   </property>
+   <property name="horizontalScrollBarPolicy">
+    <enum>Qt::ScrollBarAlwaysOff</enum>
+   </property>
+   <property name="editTriggers">
+    <set>QAbstractItemView::NoEditTriggers</set>
+   </property>
+   <property name="expandsOnDoubleClick">
+    <bool>true</bool>
+   </property>
+   <attribute name="headerVisible">
+    <bool>false</bool>
+   </attribute>
+   <attribute name="headerStretchLastSection">
+    <bool>true</bool>
+   </attribute>
   </widget>
  </widget>
  <resources/>

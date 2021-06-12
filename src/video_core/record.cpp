@@ -2,9 +2,9 @@
 #include <set>
 #include "record.h"
 #include "surface.h"
+#include "video_core/renderdoc/renderdoc.h"
 #include "video_core/renderer_opengl/gl_rasterizer.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
-#include "video_core/renderdoc/renderdoc.h"
 
 namespace Vulkan::vk {
 class CommandBuffer;
@@ -36,6 +36,7 @@ void Record::OutputMarker(Tegra::GPU* gpu, Vulkan::VKScheduler* scheduler) {
             std::vector<float> colors{1.0f, 1.0f, 1.0f, 1.0f};
             cmdbuf.InsertDebugUtilsLabelEXT(msg.c_str(), std::span<float, 4>(colors));
         });
+        break;
     }
     }
     gpu->RECORD_DRAW++;
@@ -47,6 +48,7 @@ std::optional<std::tuple<REG_LIST::const_iterator, size_t, size_t>> FindMethod(
 void Record::BuildResults(Tegra::GPU* gpu, size_t frame) {
     u32 lastDraw = -1;
     std::array<std::unordered_set<u32>, 5> encountered_methods;
+
     for (auto& entry : gpu->METHODS_CALLED) {
         GPU::DrawResult result;
         if (entry.draw != lastDraw) {
@@ -72,7 +74,7 @@ void Record::BuildResults(Tegra::GPU* gpu, size_t frame) {
             result.args.emplace_back(std::make_pair(name, arg));
             ++i;
         }
-        gpu->RECORD_RESULTS_CHANGED.emplace_back(std::move(result));
+        gpu->RECORD_RESULTS_CHANGED[gpu->RECORD_FRAMES].emplace_back(std::move(result));
     }
 
     std::vector<std::string> unchanged_state;
@@ -102,11 +104,12 @@ void Record::BuildResults(Tegra::GPU* gpu, size_t frame) {
                 result.args.emplace_back(std::make_pair(name, arg));
                 ++i;
             }
-            gpu->RECORD_RESULTS_UNCHANGED.emplace_back(std::move(result));
+            gpu->RECORD_RESULTS_UNCHANGED[gpu->RECORD_FRAMES].emplace_back(std::move(result));
         }
     }
 
-    std::sort(gpu->RECORD_RESULTS_UNCHANGED.begin(), gpu->RECORD_RESULTS_UNCHANGED.end(),
+    std::sort(gpu->RECORD_RESULTS_UNCHANGED[gpu->RECORD_FRAMES].begin(),
+              gpu->RECORD_RESULTS_UNCHANGED[gpu->RECORD_FRAMES].end(),
               [](GPU::DrawResult& a, GPU::DrawResult& b) {
                   return a.engineName < b.engineName ||
                          (a.engineName == b.engineName && a.method < b.method);
@@ -2908,6 +2911,73 @@ std::vector<std::string> Record::GetMethodNames(GPU::RecordEntry& entry,
     return methods_found;
 }
 
+void Record::ResetAndSaveRegs(Tegra::GPU* gpu) {
+    for (auto& engine : gpu->RECORD_OLD_REGS) {
+        engine.clear();
+    }
+
+    for (u32 i = 0; i < gpu->RECORD_OLD_REGS.size(); ++i) {
+        if (!Record::RECORD_ENGINE[i]) {
+            continue;
+        }
+        auto& engine = gpu->RECORD_OLD_REGS[i];
+        const auto fakeTime = std::chrono::high_resolution_clock::now();
+
+        switch (i) {
+        case 0: {
+            const auto& fermi = gpu->Fermi2D();
+            engine.reserve(fermi.regs.reg_array.size());
+            for (u32 j = 0; j < fermi.regs.reg_array.size(); ++j) {
+                Tegra::GPU::RecordEntry new_entry{EngineID::FERMI_TWOD_A, j,
+                                                  fermi.regs.reg_array[j], fakeTime, 0};
+                engine.insert({new_entry.method, new_entry});
+            }
+            break;
+        }
+        case 1: {
+            const auto& maxwell = gpu->Maxwell3D();
+            engine.reserve(maxwell.regs.reg_array.size());
+            for (u32 j = 0; j < maxwell.regs.reg_array.size(); ++j) {
+                Tegra::GPU::RecordEntry new_entry{EngineID::MAXWELL_B, j, maxwell.regs.reg_array[j],
+                                                  fakeTime, 0};
+                engine.insert({new_entry.method, new_entry});
+            }
+            break;
+        }
+        case 2: {
+            const auto& kepler_compute = gpu->KeplerCompute();
+            engine.reserve(kepler_compute.regs.reg_array.size());
+            for (u32 j = 0; j < kepler_compute.regs.reg_array.size(); ++j) {
+                Tegra::GPU::RecordEntry new_entry{EngineID::KEPLER_COMPUTE_B, j,
+                                                  kepler_compute.regs.reg_array[j], fakeTime, 0};
+                engine.insert({new_entry.method, new_entry});
+            }
+            break;
+        }
+        case 3: {
+            const auto& kepler_memory = gpu->KeplerMemory();
+            engine.reserve(kepler_memory.regs.reg_array.size());
+            for (u32 j = 0; j < kepler_memory.regs.reg_array.size(); ++j) {
+                Tegra::GPU::RecordEntry new_entry{EngineID::KEPLER_INLINE_TO_MEMORY_B, j,
+                                                  kepler_memory.regs.reg_array[j], fakeTime, 0};
+                engine.insert({new_entry.method, new_entry});
+            }
+            break;
+        }
+        case 4: {
+            const auto& maxwell_dma = gpu->MaxwellDMA();
+            engine.reserve(maxwell_dma.regs.reg_array.size());
+            for (u32 j = 0; j < maxwell_dma.regs.reg_array.size(); ++j) {
+                Tegra::GPU::RecordEntry new_entry{EngineID::MAXWELL_DMA_COPY_A, j,
+                                                  maxwell_dma.regs.reg_array[j], fakeTime, 0};
+                engine.insert({new_entry.method, new_entry});
+            }
+            break;
+        }
+        }
+    }
+}
+
 RENDERDOC_API_1_4_1* SetupRenderdoc() {
 #ifdef _WIN32
     auto renderDoc = GetModuleHandleA("renderdoc.dll");
@@ -2934,7 +3004,7 @@ void Record::CaptureFrames(u32 num) {
     if (!renderdoc_api || !renderdoc_api->IsTargetControlConnected()) {
         return;
     }
-    renderdoc_api->TriggerMultiFrameCapture(1);
+    renderdoc_api->TriggerMultiFrameCapture(num);
 }
 
 } // namespace Tegra

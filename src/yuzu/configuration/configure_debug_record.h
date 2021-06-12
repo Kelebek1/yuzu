@@ -9,6 +9,8 @@
 #include <QDialog>
 #include <QTimer>
 #include <QWidget>
+#include <QTreeView>
+#include <QHeaderView>
 
 namespace Core {
 class System;
@@ -38,27 +40,40 @@ public:
     ~ConfigureDebugRecord() override;
 
 private:
-    void UpdateViews(const QString& new_text);
+    void UpdateViews();
     void HideUnkStateChanged(s32 state);
+    void PauseClicked(s32 state);
+    void RunClicked(s32 state);
+    void StepFrameClicked(s32 state);
     void OnFilterChanged(const QString& new_text);
     void HideFilterColumns(
         const std::array<QStringList, static_cast<s32>(Columns::COUNT)>& filters);
     std::array<QStringList, static_cast<s32>(Columns::COUNT)> ParseFilters(const QString& new_text);
-    void ShowRows(s32 draw);
+    void ShowRows();
     void HideAllRows();
-    void DrawIndexChanged(s32 currentRow);
+    void DrawIndexChanged(const QModelIndex& new_index);
     void ResizeColumns();
     void ClearResults();
     void BuildResults();
-    void FillDrawIndex(u32 idx);
+    void FillDrawIndex(u32 frame, u32 draw = 0);
+    void FillPreFrame(u32 frame);
     void Print();
 
     std::unique_ptr<Ui::ConfigureDebugRecord> ui;
     Core::System& system;
     QTimer* resultsTimer;
     size_t savedFrame = 0;
-    std::vector<u32> results_changed_indexes;
-    std::vector<u32> results_unchanged_indexes;
-    std::vector<u32> draw_indexes;
-    std::array<std::vector<u32>, 5> pre_indexes;
+    s32 current_frame = 0;
+    s32 current_draw = 0;
+    std::vector<std::vector<u32>> results_changed_indexes;
+    std::vector<std::vector<u32>> results_unchanged_indexes;
+    std::vector<std::vector<u32>> draw_indexes;
+    std::vector<std::array<std::vector<u32>, 5>> pre_indexes;
+    std::vector<QStandardItemModel*> draw_models;
+    std::vector<QStandardItemModel*> pre_models;
+
+    QHeaderView* draw_vertical_header;
+    QHeaderView* draw_horizontal_header;
+    QHeaderView* pre_vertical_header;
+    QHeaderView* pre_horizontal_header;
 };

@@ -27,6 +27,11 @@
 #include "video_core/renderer_opengl/gl_shader_manager.h"
 #include "video_core/renderer_opengl/renderer_opengl.h"
 #include "video_core/textures/decoders.h"
+#include "video_core/record.h"
+
+namespace Tegra {
+class Record;
+}
 
 namespace OpenGL {
 namespace {
@@ -147,6 +152,7 @@ void RendererOpenGL::SwapBuffers(const Tegra::FramebufferConfig* framebuffer) {
     if (!framebuffer) {
         return;
     }
+
     PrepareRendertarget(framebuffer);
     RenderScreenshot();
 
@@ -160,6 +166,53 @@ void RendererOpenGL::SwapBuffers(const Tegra::FramebufferConfig* framebuffer) {
 
     context->SwapBuffers();
     render_window.OnFrameDisplayed();
+
+    if constexpr (Tegra::Record::DO_RECORD) {
+        if (Settings::values.record_is_frame_stepping &&
+            Settings::values.record_has_frame_stepped) {
+            Settings::values.record_is_frame_stepping = false;
+            Settings::values.record_has_frame_stepped = false;
+            auto& system = Core::System::GetInstance();
+            const auto _ = system.Pause();
+        }
+        if (gpu.CURRENTLY_RECORDING && gpu.METHODS_CALLED.size() > 0) {
+            LOG_INFO(HW_Memory, "Recorded frame {}, real frame was {}", gpu.RECORD_FRAMES,
+                     m_current_frame);
+            std::scoped_lock lock{gpu.record_mutex};
+            Tegra::Record::BuildResults(&gpu, m_current_frame);
+            gpu.RECORDED_FRAMES.push_back(m_current_frame);
+            gpu.RECORD_FRAMES++;
+            gpu.METHODS_CALLED.clear();
+            Tegra::Record::ResetAndSaveRegs(&gpu);
+
+            if (gpu.RECORD_FRAMES == Settings::values.record_num_frames) {
+                gpu.CURRENTLY_RECORDING = false;
+            }
+        } else if (gpu.CURRENTLY_RECORDING &&
+                   gpu.RECORD_FRAMES >= Settings::values.record_num_frames) {
+            gpu.CURRENTLY_RECORDING = false;
+        } else if (Settings::values.pending_frame_record) {
+            gpu.RECORDED_FRAMES.clear();
+            gpu.RECORD_RESULTS_CHANGED.clear();
+            gpu.RECORD_RESULTS_UNCHANGED.clear();
+            gpu.RECORD_RESULTS_CHANGED.resize(Settings::values.record_num_frames);
+            gpu.RECORD_RESULTS_UNCHANGED.resize(Settings::values.record_num_frames);
+            Tegra::Record::ResetAndSaveRegs(&gpu);
+
+            gpu.CURRENTLY_RECORDING = true;
+            Settings::values.pending_frame_record = false;
+            gpu.RECORD_FRAMES = 0;
+            Tegra::Record::CaptureFrames(Settings::values.record_num_frames);
+        }
+
+        if (Settings::values.record_is_frame_stepping &&
+            !Settings::values.record_has_frame_stepped) {
+            Settings::values.record_has_frame_stepped = true;
+        }
+
+        gpu.RECORD_DRAW = 0;
+        gpu.RECORD_TIME_ORIGIN = std::chrono::high_resolution_clock::now();
+    }
 }
 
 void RendererOpenGL::PrepareRendertarget(const Tegra::FramebufferConfig* framebuffer) {

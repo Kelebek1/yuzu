@@ -12,8 +12,8 @@
 #include "video_core/gpu.h"
 #include "video_core/memory_manager.h"
 #include "video_core/rasterizer_interface.h"
-#include "video_core/record.h"
 #include "video_core/textures/texture.h"
+#include "video_core/record.h"
 
 namespace Tegra::Engines {
 

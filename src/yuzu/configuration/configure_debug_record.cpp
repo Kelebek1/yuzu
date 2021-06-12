@@ -27,36 +27,37 @@ ConfigureDebugRecord::ConfigureDebugRecord(QWidget* parent)
 
     ui->do_capture->setEnabled(true);
     ui->send_to_console->setEnabled(true);
+    ui->btn_StepFrame->setEnabled(false);
+    ui->btn_StepFrame->setVisible(false);
+    ui->btn_Run->setEnabled(false);
 
-    QStandardItemModel* drawModel = new QStandardItemModel();
-    ui->table_record_draw_state->setModel(drawModel);
-    drawModel->insertColumns(0, static_cast<s32>(Columns::COUNT));
-    drawModel->setHorizontalHeaderLabels(
-        QStringList({tr("Time"), tr("Engine"), tr("Reg"), tr("Method"), tr("Argument")}));
-    ui->table_record_draw_state->verticalHeader()->setVisible(false);
-    ui->table_record_draw_state->horizontalHeader()->setStretchLastSection(false);
-    ui->table_record_draw_state->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft);
-    ui->table_record_draw_state->horizontalHeader()->setSectionResizeMode(
-        QHeaderView::ResizeMode::Fixed);
-    ui->table_record_draw_state->verticalHeader()->setSectionResizeMode(
-        QHeaderView::ResizeMode::Fixed);
+    QStandardItemModel* listModel = new QStandardItemModel();
+    ui->list_record_draws->setModel(listModel);
+    ui->list_record_draws->setUniformRowHeights(true);
 
-    QStandardItemModel* preModel = new QStandardItemModel();
-    ui->table_record_pre_state->setModel(preModel);
-    preModel->insertColumns(0, static_cast<s32>(Columns::COUNT));
-    preModel->setHorizontalHeaderLabels(
-        QStringList({tr("Time"), tr("Engine"), tr("Reg"), tr("Method"), tr("Argument")}));
-    ui->table_record_pre_state->verticalHeader()->setVisible(false);
-    ui->table_record_pre_state->hideColumn(static_cast<s32>(Columns::TIME));
-    ui->table_record_pre_state->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft);
-    ui->table_record_pre_state->horizontalHeader()->setSectionResizeMode(
-        QHeaderView::ResizeMode::Fixed);
-    ui->table_record_pre_state->verticalHeader()->setSectionResizeMode(
-        QHeaderView::ResizeMode::Fixed);
+    draw_vertical_header = new QHeaderView(Qt::Orientation::Vertical);
+    draw_vertical_header->setVisible(false);
+    draw_vertical_header->setSectionResizeMode(QHeaderView::ResizeMode::Fixed);
+    draw_vertical_header->setDefaultSectionSize(15);
+    draw_vertical_header->setMinimumSectionSize(15);
+    draw_horizontal_header = new QHeaderView(Qt::Orientation::Horizontal);
+    draw_horizontal_header->setVisible(true);
+    draw_horizontal_header->setStretchLastSection(false);
+    draw_horizontal_header->setDefaultAlignment(Qt::AlignLeft);
+    draw_horizontal_header->setSectionResizeMode(QHeaderView::ResizeMode::Fixed);
 
-    ResizeColumns();
+    pre_vertical_header = new QHeaderView(Qt::Orientation::Vertical);
+    pre_vertical_header->setVisible(false);
+    pre_vertical_header->setSectionResizeMode(QHeaderView::ResizeMode::Fixed);
+    pre_vertical_header->setDefaultSectionSize(15);
+    pre_vertical_header->setMinimumSectionSize(15);
+    pre_horizontal_header = new QHeaderView(Qt::Orientation::Horizontal);
+    pre_horizontal_header->setVisible(true);
+    pre_horizontal_header->setStretchLastSection(false);
+    pre_horizontal_header->setDefaultAlignment(Qt::AlignLeft);
+    pre_horizontal_header->setSectionResizeMode(QHeaderView::ResizeMode::Fixed);
 
-    connect(ui->list_record_draws, &QListWidget::currentRowChanged, this,
+    connect(ui->list_record_draws, &QTreeView::clicked, this,
             &ConfigureDebugRecord::DrawIndexChanged);
 
     resultsTimer->setSingleShot(false);
@@ -75,23 +76,51 @@ ConfigureDebugRecord::ConfigureDebugRecord(QWidget* parent)
             ui->do_capture->setEnabled(false);
             ui->send_to_console->setEnabled(false);
             Settings::values.pending_frame_record = true;
+            Settings::values.record_num_frames = ui->spin_numFrames->value();
             resultsTimer->start();
         }
     });
 
-    connect(ui->send_to_console, &QPushButton::clicked, [this]() { Print(); });
+    connect(ui->send_to_console, &QPushButton::clicked, this, &ConfigureDebugRecord::Print);
     connect(ui->lineEdit_filter, &QLineEdit::textEdited, this,
             &ConfigureDebugRecord::OnFilterChanged);
     connect(ui->checkBox_hide_unk, &QCheckBox::stateChanged, this,
             &ConfigureDebugRecord::HideUnkStateChanged);
+    connect(ui->btn_Pause, &QPushButton::clicked, this, &ConfigureDebugRecord::PauseClicked);
+    connect(ui->btn_Run, &QPushButton::clicked, this, &ConfigureDebugRecord::RunClicked);
+    connect(ui->btn_StepFrame, &QPushButton::clicked, this,
+            &ConfigureDebugRecord::StepFrameClicked);
 }
 
 ConfigureDebugRecord::~ConfigureDebugRecord() = default;
 
 void ConfigureDebugRecord::HideUnkStateChanged(s32 state) {
     HideAllRows();
-    ShowRows(ui->list_record_draws->currentRow());
-    UpdateViews(ui->lbl_filter->text());
+    ShowRows();
+    UpdateViews();
+}
+
+void ConfigureDebugRecord::PauseClicked(s32 state) {
+    ui->btn_Pause->setEnabled(false);
+    ui->btn_Pause->setVisible(false);
+    ui->btn_StepFrame->setEnabled(true);
+    ui->btn_StepFrame->setVisible(true);
+    ui->btn_Run->setEnabled(true);
+    const auto _ = system.Pause();
+}
+
+void ConfigureDebugRecord::RunClicked(s32 state) {
+    ui->btn_Run->setEnabled(false);
+    ui->btn_Pause->setEnabled(true);
+    ui->btn_Pause->setVisible(true);
+    ui->btn_StepFrame->setEnabled(false);
+    ui->btn_StepFrame->setVisible(false);
+    const auto _ = system.Run();
+}
+
+void ConfigureDebugRecord::StepFrameClicked(s32 state) {
+    Settings::values.record_is_frame_stepping = true;
+    const auto _ = system.Run();
 }
 
 void ConfigureDebugRecord::HideFilterColumns(
@@ -101,18 +130,16 @@ void ConfigureDebugRecord::HideFilterColumns(
     ui->table_record_draw_state->blockSignals(true);
     ui->table_record_pre_state->blockSignals(true);
 
-    const auto currentDraw = ui->list_record_draws->currentRow();
-    QStandardItemModel* drawModel =
-        static_cast<QStandardItemModel*>(ui->table_record_draw_state->model());
-    QStandardItemModel* preModel =
-        static_cast<QStandardItemModel*>(ui->table_record_pre_state->model());
+    auto& drawModel = draw_models[current_frame];
+    auto& preModel = pre_models[current_frame];
 
-    for (u32 i = draw_indexes[currentDraw]; i < draw_indexes[currentDraw + 1]; ++i) {
+    for (u32 i = draw_indexes[current_frame][current_draw];
+         i < draw_indexes[current_frame][current_draw + 1]; ++i) {
         std::array<bool, static_cast<s32>(Columns::COUNT)> showThisRow{};
         for (size_t col = 0; col < filters.size(); ++col) {
             const auto item = drawModel->item(i, static_cast<s32>(col));
             for (auto& filter : filters[col]) {
-                if (item->text().contains(filter)) {
+                if (item->text().contains(filter, Qt::CaseInsensitive)) {
                     showThisRow[col] = true;
                 }
             }
@@ -147,8 +174,8 @@ void ConfigureDebugRecord::HideFilterColumns(
     ui->table_record_pre_state->blockSignals(false);
 }
 
-void ConfigureDebugRecord::UpdateViews(const QString& new_text) {
-    const auto filters = ParseFilters(new_text);
+void ConfigureDebugRecord::UpdateViews() {
+    const auto filters = ParseFilters(ui->lineEdit_filter->text());
     const bool activeFilter = std::any_of(filters.begin(), filters.end(),
                                           [](const QStringList& col) { return col.size() > 0; });
     if (activeFilter) {
@@ -187,6 +214,8 @@ std::array<QStringList, static_cast<s32>(Columns::COUNT)> ConfigureDebugRecord::
                 filters[static_cast<s32>(Columns::METHOD)].push_back(a[1]);
             } else if (a[0].contains(tr("arg"), Qt::CaseInsensitive)) {
                 filters[static_cast<s32>(Columns::ARGUMENT)].push_back(a[1]);
+            } else {
+                filters[static_cast<s32>(Columns::METHOD)].push_back(in_filter);
             }
         } else {
             filters[static_cast<s32>(Columns::METHOD)].push_back(in_filter);
@@ -197,40 +226,33 @@ std::array<QStringList, static_cast<s32>(Columns::COUNT)> ConfigureDebugRecord::
 
 void ConfigureDebugRecord::OnFilterChanged(const QString& new_text) {
     HideAllRows();
-    ShowRows(ui->list_record_draws->currentRow());
-    UpdateViews(new_text);
+    ShowRows();
+    UpdateViews();
 }
 
-void ConfigureDebugRecord::ShowRows(s32 draw = -1) {
+void ConfigureDebugRecord::ShowRows() {
     const auto& gpu = system.GPU();
 
     ui->table_record_draw_state->blockSignals(true);
     ui->table_record_pre_state->blockSignals(true);
 
-    s32 i = 0;
-    for (const auto& result : gpu.RECORD_RESULTS_CHANGED) {
-        for (const auto& arg : result.args) {
-            if (ui->checkBox_hide_unk->isChecked() && arg.first.find("unk_") != std::string::npos) {
-                ++i;
-                continue;
-            }
-            if (draw == -1 || result.draw == draw) {
-                ui->table_record_draw_state->showRow(i);
-            }
-            ++i;
+    for (u32 i = draw_indexes[current_frame][current_draw];
+         i < draw_indexes[current_frame][current_draw + 1]; ++i) {
+        const auto& text =
+            draw_models[current_frame]->item(i, static_cast<s32>(Columns::METHOD))->text();
+        if (ui->checkBox_hide_unk->isChecked() && text.contains(tr("unk_"))) {
+            continue;
         }
+        ui->table_record_draw_state->showRow(i);
     }
 
-    i = 0;
-    for (const auto& result : gpu.RECORD_RESULTS_UNCHANGED) {
-        for (const auto& arg : result.args) {
-            if (ui->checkBox_hide_unk->isChecked() && arg.first.find("unk_") != std::string::npos) {
-                ++i;
-                continue;
-            }
-            ui->table_record_pre_state->showRow(i);
-            ++i;
+    for (s32 i = 0; i < pre_models[current_frame]->rowCount(); ++i) {
+        const auto& text =
+            pre_models[current_frame]->item(i, static_cast<s32>(Columns::METHOD))->text();
+        if (ui->checkBox_hide_unk->isChecked() && text.contains(tr("unk_"))) {
+            continue;
         }
+        ui->table_record_pre_state->showRow(i);
     }
 
     ui->table_record_draw_state->blockSignals(false);
@@ -243,33 +265,46 @@ void ConfigureDebugRecord::HideAllRows() {
     ui->table_record_draw_state->blockSignals(true);
     ui->table_record_pre_state->blockSignals(true);
 
-    s32 i = 0;
-    for (const auto& result : gpu.RECORD_RESULTS_CHANGED) {
-        for (const auto& arg : result.args) {
-            ui->table_record_draw_state->hideRow(i);
-            ++i;
-        }
+    for (s32 i = 0; i < draw_models[current_frame]->rowCount(); ++i) {
+        ui->table_record_draw_state->hideRow(i);
     }
 
     ui->table_record_draw_state->blockSignals(false);
     ui->table_record_pre_state->blockSignals(false);
 }
 
-void ConfigureDebugRecord::DrawIndexChanged(s32 currentRow) {
-    if (currentRow == -1) {
-        return;
+void ConfigureDebugRecord::DrawIndexChanged(const QModelIndex& new_index) {
+    QStandardItemModel* listModel =
+        static_cast<QStandardItemModel*>(ui->list_record_draws->model());
+
+    u32 new_frame;
+    u32 new_draw;
+    if (!listModel->itemFromIndex(new_index)->parent()) {
+        // is a Frame, not a draw
+        new_frame = new_index.row();
+        new_draw = listModel->itemFromIndex(new_index)->child(0)->row();
+    } else {
+        new_frame = listModel->itemFromIndex(new_index)->parent()->row();
+        new_draw = listModel->itemFromIndex(new_index)->row();
     }
 
-    QStandardItemModel* drawModel =
-        static_cast<QStandardItemModel*>(ui->table_record_draw_state->model());
-    auto newDrawIdx = draw_indexes[currentRow];
-    if (!drawModel->item(newDrawIdx, static_cast<s32>(Columns::TIME))) {
-        FillDrawIndex(currentRow);
+    current_frame = new_frame;
+    current_draw = new_draw;
+
+    ui->table_record_draw_state->setModel(draw_models[new_frame]);
+    ui->table_record_pre_state->setModel(pre_models[new_frame]);
+
+    auto newDrawIdx = draw_indexes[new_frame][new_draw];
+    if (!pre_models[new_frame]->item(0, static_cast<s32>(Columns::METHOD))) {
+        FillPreFrame(new_frame);
+    }
+    if (!draw_models[new_frame]->item(newDrawIdx, static_cast<s32>(Columns::METHOD))) {
+        FillDrawIndex(new_frame, new_draw);
     }
 
     HideAllRows();
-    ShowRows(currentRow);
-    UpdateViews(ui->lineEdit_filter->text());
+    ShowRows();
+    UpdateViews();
 }
 
 void ConfigureDebugRecord::ResizeColumns() {
@@ -318,20 +353,28 @@ void ConfigureDebugRecord::ResizeColumns() {
 }
 
 void ConfigureDebugRecord::ClearResults() {
-    ui->list_record_draws->clear();
+    QStandardItemModel* listModel =
+        static_cast<QStandardItemModel*>(ui->list_record_draws->model());
+    listModel->clear();
 
-    QStandardItemModel* drawModel =
-        static_cast<QStandardItemModel*>(ui->table_record_draw_state->model());
-    QStandardItemModel* preModel =
-        static_cast<QStandardItemModel*>(ui->table_record_pre_state->model());
     ui->table_record_draw_state->setModel(nullptr);
+    for (auto& drawModel : draw_models) {
+        drawModel->clear();
+        delete drawModel;
+    }
+
     ui->table_record_pre_state->setModel(nullptr);
-    drawModel->removeRows(0, drawModel->rowCount());
-    preModel->removeRows(0, preModel->rowCount());
-    ui->table_record_draw_state->setModel(drawModel);
-    ui->table_record_pre_state->setModel(preModel);
+    for (auto& preModel : pre_models) {
+        preModel->clear();
+        delete preModel;
+    }
+
+    draw_models.clear();
+    pre_models.clear();
     results_changed_indexes.clear();
+    results_unchanged_indexes.clear();
     draw_indexes.clear();
+    pre_indexes.clear();
 }
 
 void ConfigureDebugRecord::BuildResults() {
@@ -339,28 +382,37 @@ void ConfigureDebugRecord::BuildResults() {
 
     ClearResults();
 
-    QStandardItemModel* drawModel =
-        static_cast<QStandardItemModel*>(ui->table_record_draw_state->model());
-    QStandardItemModel* preModel =
-        static_cast<QStandardItemModel*>(ui->table_record_pre_state->model());
+    results_changed_indexes.resize(Settings::values.record_num_frames);
+    draw_indexes.resize(Settings::values.record_num_frames);
 
-    u32 total_row_count = 0;
-    u32 idx = 0;
-    s32 lastDraw = -1;
-    for (const auto& result : gpu.RECORD_RESULTS_CHANGED) {
-        if (lastDraw != result.draw) {
-            results_changed_indexes.push_back(idx);
-            draw_indexes.push_back(total_row_count);
-            lastDraw = result.draw;
+    u32 frame_num = 0;
+    for (auto& frame : gpu.RECORD_RESULTS_CHANGED) {
+        u32 total_row_count = 0;
+        u32 idx = 0;
+        s32 lastDraw = -1;
+        for (const auto& result : frame) {
+            if (lastDraw != result.draw) {
+                results_changed_indexes[frame_num].push_back(idx);
+                draw_indexes[frame_num].push_back(total_row_count);
+                lastDraw = result.draw;
+            }
+            for (const auto& arg : result.args) {
+                ++total_row_count;
+            }
+            ++idx;
         }
-        for (const auto& arg : result.args) {
-            ++total_row_count;
-        }
-        ++idx;
+        results_changed_indexes[frame_num].push_back(idx);
+        draw_indexes[frame_num].push_back(total_row_count);
+
+        QStandardItemModel* drawModel = new QStandardItemModel;
+        drawModel->insertColumns(0, static_cast<s32>(Columns::COUNT));
+        drawModel->setHorizontalHeaderLabels(
+            QStringList({tr("Time"), tr("Engine"), tr("Reg"), tr("Method"), tr("Argument")}));
+        drawModel->setRowCount(total_row_count);
+
+        draw_models.push_back(drawModel);
+        frame_num++;
     }
-    results_changed_indexes.push_back(idx);
-    draw_indexes.push_back(total_row_count);
-    drawModel->setRowCount(total_row_count);
 
     const auto GetEngineIdx = [](std::string engine) -> s32 {
         if (engine.find("FERMI") != std::string::npos) {
@@ -376,66 +428,72 @@ void ConfigureDebugRecord::BuildResults() {
         }
         return 1;
     };
-    std::string lastEngine{""};
-    total_row_count = 0;
-    idx = 0;
-    for (const auto& result : gpu.RECORD_RESULTS_UNCHANGED) {
-        if (lastEngine != result.engineName) {
-            results_unchanged_indexes.push_back(idx);
-            pre_indexes[GetEngineIdx(result.engineName)].push_back(total_row_count);
-            lastEngine = result.engineName;
+
+    results_unchanged_indexes.resize(Settings::values.record_num_frames);
+    pre_indexes.resize(Settings::values.record_num_frames);
+
+    frame_num = 0;
+    for (auto& frame : gpu.RECORD_RESULTS_UNCHANGED) {
+        std::string lastEngine{""};
+        u32 total_row_count = 0;
+        u32 idx = 0;
+        for (const auto& result : frame) {
+            if (lastEngine != result.engineName) {
+                results_unchanged_indexes[frame_num].push_back(idx);
+                pre_indexes[frame_num][GetEngineIdx(result.engineName)].push_back(total_row_count);
+                lastEngine = result.engineName;
+            }
+            for (const auto& arg : result.args) {
+                ++total_row_count;
+            }
+            ++idx;
         }
-        for (const auto& arg : result.args) {
-            ++total_row_count;
-        }
-        ++idx;
+
+        QStandardItemModel* preModel = new QStandardItemModel;
+        preModel->insertColumns(0, static_cast<s32>(Columns::COUNT));
+        preModel->setHorizontalHeaderLabels(
+            QStringList({tr("Time"), tr("Engine"), tr("Reg"), tr("Method"), tr("Argument")}));
+        preModel->setRowCount(total_row_count);
+
+        pre_models.push_back(preModel);
+        frame_num++;
     }
-    preModel->setRowCount(total_row_count);
 
     // Build out the list of draws
-    for (u32 i = 0; i < draw_indexes.size() - 1; ++i) {
-        ui->list_record_draws->addItem(
-            new QListWidgetItem(QString::fromStdString(fmt::format("Draw {}", i))));
-    }
-
-    ui->table_record_pre_state->setModel(nullptr);
-    u32 i = 0;
-    for (const auto& result : gpu.RECORD_RESULTS_UNCHANGED) {
-        for (const auto& arg : result.args) {
-            // Build out the list of args
-            preModel->setItem(i, static_cast<s32>(Columns::ENGINE),
-                              new QStandardItem(QString::fromStdString(result.engineName)));
-            preModel->setItem(
-                i, static_cast<s32>(Columns::REG),
-                new QStandardItem(QString::fromStdString(fmt::format("0x{:04X}", result.method))));
-            preModel->setItem(i, static_cast<s32>(Columns::METHOD),
-                              new QStandardItem(QString::fromStdString(arg.first)));
-            preModel->setItem(i, static_cast<s32>(Columns::ARGUMENT),
-                              new QStandardItem(QString::fromStdString(arg.second)));
-            ++i;
+    QStandardItemModel* listModel =
+        static_cast<QStandardItemModel*>(ui->list_record_draws->model());
+    ui->list_record_draws->setModel(nullptr);
+    for (u32 frame_num = 0; frame_num < Settings::values.record_num_frames; ++frame_num) {
+        auto frame = new QStandardItem(
+            QString::fromStdString(fmt::format("Frame {}", gpu.RECORDED_FRAMES[frame_num])));
+        for (u32 i = 0; i < draw_indexes[frame_num].size() - 1; ++i) {
+            frame->appendRow(new QStandardItem(QString::fromStdString(fmt::format("Draw {}", i))));
         }
+        listModel->invisibleRootItem()->appendRow(frame);
     }
-    ui->table_record_pre_state->setModel(preModel);
-    ui->table_record_pre_state->hideColumn(static_cast<s32>(Columns::TIME));
+    ui->list_record_draws->setModel(listModel);
+    ui->list_record_draws->selectionModel()->setCurrentIndex(
+        listModel->item(0)->child(0)->index(),
+        QItemSelectionModel::SelectionFlag::Select | QItemSelectionModel::SelectionFlag::Rows);
+    ui->list_record_draws->expandAll();
+    ui->list_record_draws->update();
 
-    ui->list_record_draws->setCurrentRow(0);
-    DrawIndexChanged(0);
+    DrawIndexChanged(ui->list_record_draws->currentIndex());
 
     ui->do_capture->setEnabled(true);
     ui->send_to_console->setEnabled(true);
 }
 
-void ConfigureDebugRecord::FillDrawIndex(u32 idx) {
+void ConfigureDebugRecord::FillDrawIndex(u32 frame, u32 draw) {
     auto& gpu = system.GPU();
 
-    QStandardItemModel* drawModel =
-        static_cast<QStandardItemModel*>(ui->table_record_draw_state->model());
     ui->table_record_draw_state->setModel(nullptr);
+    QStandardItemModel* drawModel = draw_models[frame];
 
-    u32 draw_idx = draw_indexes.at(idx);
-    u32 result_idx = results_changed_indexes.at(idx);
-    while (result_idx < results_changed_indexes.at(idx + 1)) {
-        const auto& result = gpu.RECORD_RESULTS_CHANGED[result_idx++];
+    u32 draw_idx = draw_indexes[frame].at(draw);
+    u32 result_idx = results_changed_indexes[frame].at(draw);
+    while (result_idx < results_changed_indexes[frame].at(draw + 1)) {
+        const auto& result = gpu.RECORD_RESULTS_CHANGED[frame][result_idx++];
         for (const auto& arg : result.args) {
             // Build out the list of args
             drawModel->setItem(
@@ -455,52 +513,96 @@ void ConfigureDebugRecord::FillDrawIndex(u32 idx) {
     }
 
     ui->table_record_draw_state->setModel(drawModel);
+    ui->table_record_draw_state->setVerticalHeader(draw_vertical_header);
+    ui->table_record_draw_state->setHorizontalHeader(draw_horizontal_header);
+    ui->table_record_draw_state->horizontalHeader()->setVisible(true);
+}
+
+void ConfigureDebugRecord::FillPreFrame(u32 frame) {
+    const Tegra::GPU& gpu = system.GPU();
+
+    ui->table_record_pre_state->setModel(nullptr);
+    QStandardItemModel* preModel = pre_models[frame];
+
+    u32 i = 0;
+    for (const auto& result : gpu.RECORD_RESULTS_UNCHANGED[frame]) {
+        for (const auto& arg : result.args) {
+            // Build out the list of args
+            preModel->setItem(i, static_cast<s32>(Columns::ENGINE),
+                              new QStandardItem(QString::fromStdString(result.engineName)));
+            preModel->setItem(
+                i, static_cast<s32>(Columns::REG),
+                new QStandardItem(QString::fromStdString(fmt::format("0x{:04X}", result.method))));
+            preModel->setItem(i, static_cast<s32>(Columns::METHOD),
+                              new QStandardItem(QString::fromStdString(arg.first)));
+            preModel->setItem(i, static_cast<s32>(Columns::ARGUMENT),
+                              new QStandardItem(QString::fromStdString(arg.second)));
+            ++i;
+        }
+    }
+
+    ui->table_record_pre_state->setModel(preModel);
+    ui->table_record_pre_state->setVerticalHeader(pre_vertical_header);
+    ui->table_record_pre_state->setHorizontalHeader(pre_horizontal_header);
+    ui->table_record_pre_state->hideColumn(static_cast<s32>(Columns::TIME));
+    ui->table_record_pre_state->horizontalHeader()->setVisible(true);
 }
 
 void ConfigureDebugRecord::Print() {
     const auto& gpu = system.GetInstance().GPU();
-    std::string toPrint;
-    toPrint.reserve(0x2000);
 
-    toPrint += "\n\n====================\n======PRE STATE=====\n====================\n";
+    u32 frame_num = 0;
+    for (auto& frame : gpu.RECORD_RESULTS_UNCHANGED) {
+        std::string toPrint;
+        toPrint.reserve(0x2000);
 
-    for (auto& entry : gpu.RECORD_RESULTS_UNCHANGED) {
-        size_t line_width = toPrint.size();
-        toPrint += fmt::format("    {} (0x{:04X}) ", entry.engineName, entry.method);
-        line_width = toPrint.size() - line_width;
-        size_t i = 0;
-        for (const auto& [name, arg] : entry.args) {
-            if (i > 0) {
-                toPrint += std::string(line_width, ' ');
+        toPrint += fmt::format(
+            "\n\n========================================\n==========================FRAME "
+            "{}=========================\n========================================",
+            gpu.RECORDED_FRAMES[frame_num]);
+
+        toPrint += "\n\n====================\n======PRE STATE=====\n====================\n";
+
+        for (auto& entry : frame) {
+            size_t line_width = toPrint.size();
+            toPrint += fmt::format("    {} (0x{:04X}) ", entry.engineName, entry.method);
+            line_width = toPrint.size() - line_width;
+            size_t i = 0;
+            for (const auto& [name, arg] : entry.args) {
+                if (i > 0) {
+                    toPrint += std::string(line_width, ' ');
+                }
+                toPrint += fmt::format("  {} = {}\n", name, arg);
+                ++i;
             }
-            toPrint += fmt::format("  {} = {}\n", name, arg);
-            ++i;
         }
-    }
 
-    toPrint += "\n\n====================\n======= DRAWS ======\n====================\n";
+        toPrint += "\n\n====================\n======= DRAWS ======\n====================\n";
+        frame_num++;
 
-    size_t lastDraw = -1;
-    for (auto& entry : gpu.RECORD_RESULTS_CHANGED) {
-        if (lastDraw != entry.draw) {
-            lastDraw = entry.draw;
-            toPrint += fmt::format("\n\nDraw {}\n", entry.draw);
-        }
-        size_t line_width = toPrint.size();
-        toPrint += fmt::format("    {:4} {} (0x{:04X}) ", entry.time.count(), entry.engineName,
-                               entry.method);
-        line_width = toPrint.size() - line_width;
-        size_t i = 0;
-        for (const auto& [name, arg] : entry.args) {
-            if (i > 0) {
-                toPrint += std::string(line_width, ' ');
+        for (auto& frame : gpu.RECORD_RESULTS_CHANGED) {
+            size_t lastDraw = -1;
+            for (auto& entry : frame) {
+                if (lastDraw != entry.draw) {
+                    lastDraw = entry.draw;
+                    toPrint += fmt::format("\n\nDraw {}\n", entry.draw);
+                }
+                size_t line_width = toPrint.size();
+                toPrint += fmt::format("    {:4} {} (0x{:04X}) ", entry.time.count(),
+                                       entry.engineName, entry.method);
+                line_width = toPrint.size() - line_width;
+                size_t i = 0;
+                for (const auto& [name, arg] : entry.args) {
+                    if (i > 0) {
+                        toPrint += std::string(line_width, ' ');
+                    }
+                    toPrint += fmt::format("  {} = {}\n", name, arg);
+                    ++i;
+                }
             }
-            toPrint += fmt::format("  {} = {}\n", name, arg);
-            ++i;
         }
+        LOG_INFO(Render_OpenGL, "{}", toPrint);
     }
-
-    LOG_INFO(Render_OpenGL, "{}", toPrint);
 }
 
 #pragma optimize("", on)

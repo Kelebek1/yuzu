@@ -102,6 +102,7 @@ public:
     };
 
     static void BuildResults(Tegra::GPU* gpu, size_t frame);
+    static void ResetAndSaveRegs(Tegra::GPU* gpu);
     static void OutputMarker(Tegra::GPU* gpu, Vulkan::VKScheduler* scheduler = nullptr);
     static void CaptureFrames(u32 num = 1);
 
