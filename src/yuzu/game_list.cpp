@@ -341,11 +341,7 @@ GameList::GameList(FileSys::VirtualFilesystem vfs, FileSys::ManualContentProvide
     connect(tree_view, &QTreeView::customContextMenuRequested, this, &GameList::PopupContextMenu);
     connect(tree_view, &QTreeView::expanded, this, &GameList::OnItemExpanded);
     connect(tree_view, &QTreeView::collapsed, this, &GameList::OnItemExpanded);
-    connect(tree_view->header(), &QHeaderView::sectionResized, this,
-            &GameList::SaveInterfaceLayout);
-    connect(tree_view->header(), &QHeaderView::sectionMoved, this, &GameList::SaveInterfaceLayout);
-    connect(tree_view->header(), &QHeaderView::sortIndicatorChanged, this,
-            &GameList::SaveInterfaceLayout);
+
     // We must register all custom types with the Qt Automoc system so that we are able to use
     // it with signals/slots. In this case, QList falls under the umbrells of custom types.
     qRegisterMetaType<QList<QStandardItem*>>("QList<QStandardItem*>");
@@ -509,6 +505,10 @@ void GameList::PopupContextMenu(const QPoint& menu_location) {
 void GameList::AddGamePopup(QMenu& context_menu, u64 program_id, const std::string& path) {
     QAction* favorite = context_menu.addAction(tr("Favorite"));
     context_menu.addSeparator();
+    QAction* start_game = context_menu.addAction(tr("Start Game"));
+    QAction* start_game_global =
+        context_menu.addAction(tr("Start Game without Custom Configuration"));
+    context_menu.addSeparator();
     QAction* open_save_location = context_menu.addAction(tr("Open Save Data Location"));
     QAction* open_mod_location = context_menu.addAction(tr("Open Mod Data Location"));
     QAction* open_transferable_shader_cache =
@@ -543,6 +543,12 @@ void GameList::AddGamePopup(QMenu& context_menu, u64 program_id, const std::stri
     connect(favorite, &QAction::triggered, [this, program_id]() { ToggleFavorite(program_id); });
     connect(open_save_location, &QAction::triggered, [this, program_id, path]() {
         emit OpenFolderRequested(program_id, GameListOpenTarget::SaveData, path);
+    });
+    connect(start_game, &QAction::triggered, [this, path]() {
+        emit BootGame(QString::fromStdString(path), 0, StartGameType::Normal);
+    });
+    connect(start_game_global, &QAction::triggered, [this, path]() {
+        emit BootGame(QString::fromStdString(path), 0, StartGameType::Global);
     });
     connect(open_mod_location, &QAction::triggered, [this, program_id, path]() {
         emit OpenFolderRequested(program_id, GameListOpenTarget::ModData, path);

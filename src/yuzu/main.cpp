@@ -1104,6 +1104,7 @@ void GMainWindow::OnAppFocusStateChanged(Qt::ApplicationState state) {
 }
 
 void GMainWindow::ConnectWidgetEvents() {
+    connect(game_list, &GameList::BootGame, this, &GMainWindow::BootGame);
     connect(game_list, &GameList::GameChosen, this, &GMainWindow::OnGameListLoadFile);
     connect(game_list, &GameList::OpenDirectory, this, &GMainWindow::OnGameListOpenDirectory);
     connect(game_list, &GameList::OpenFolderRequested, this, &GMainWindow::OnGameListOpenFolder);
@@ -1330,7 +1331,7 @@ void GMainWindow::SelectAndSetCurrentUser() {
     Settings::values.current_user = dialog.GetIndex();
 }
 
-void GMainWindow::BootGame(const QString& filename, std::size_t program_index) {
+void GMainWindow::BootGame(const QString& filename, std::size_t program_index, StartGameType type) {
     LOG_INFO(Frontend, "yuzu starting...");
     StoreRecentFile(filename); // Put the filename on top of the list
 
@@ -1342,7 +1343,8 @@ void GMainWindow::BootGame(const QString& filename, std::size_t program_index) {
     const auto v_file = Core::GetGameFileFromPath(vfs, filename.toUtf8().constData());
     const auto loader = Loader::GetLoader(system, v_file, program_index);
 
-    if (!(loader == nullptr || loader->ReadProgramId(title_id) != Loader::ResultStatus::Success)) {
+    if (loader != nullptr && loader->ReadProgramId(title_id) == Loader::ResultStatus::Success &&
+        type == StartGameType::Normal) {
         // Load per game settings
         const auto file_path = std::filesystem::path{filename.toStdU16String()};
         const auto config_file_name = title_id == 0
@@ -1953,6 +1955,18 @@ void GMainWindow::OnGameListDumpRomFS(u64 program_id, const std::string& game_pa
 
     const auto full = res == selections.constFirst();
     const auto entry_size = CalculateRomFSEntrySize(extracted, full);
+
+    // The minimum required space is the size of the extracted RomFS + 1 GiB
+    const auto minimum_free_space = extracted->GetSize() + 0x40000000;
+
+    if (full && Common::FS::GetFreeSpaceSize(path) < minimum_free_space) {
+        QMessageBox::warning(this, tr("RomFS Extraction Failed!"),
+                             tr("There is not enough free space at %1 to extract the RomFS. Please "
+                                "free up space or select a different dump directory at "
+                                "Emulation > Configure > System > Filesystem > Dump Root")
+                                 .arg(QString::fromStdString(path)));
+        return;
+    }
 
     QProgressDialog progress(tr("Extracting RomFS..."), tr("Cancel"), 0,
                              static_cast<s32>(entry_size), this);
@@ -2606,13 +2620,53 @@ void GMainWindow::OnConfigure() {
             &GMainWindow::OnLanguageChanged);
 
     const auto result = configure_dialog.exec();
-    if (result != QDialog::Accepted && !UISettings::values.configuration_applied) {
+    if (result != QDialog::Accepted && !UISettings::values.configuration_applied &&
+        !UISettings::values.reset_to_defaults) {
+        // Runs if the user hit Cancel or closed the window, and did not ever press the Apply button
+        // or `Reset to Defaults` button
         return;
     } else if (result == QDialog::Accepted) {
+        // Only apply new changes if user hit Okay
+        // This is here to avoid applying changes if the user hit Apply, made some changes, then hit
+        // Cancel
         configure_dialog.ApplyConfiguration();
-        controller_dialog->refreshConfiguration();
+    } else if (UISettings::values.reset_to_defaults) {
+        LOG_INFO(Frontend, "Resetting all settings to defaults");
+        if (!Common::FS::RemoveFile(config->GetConfigFilePath())) {
+            LOG_WARNING(Frontend, "Failed to remove configuration file");
+        }
+        if (!Common::FS::RemoveDirContentsRecursively(
+                Common::FS::GetYuzuPath(Common::FS::YuzuPath::ConfigDir) / "custom")) {
+            LOG_WARNING(Frontend, "Failed to remove custom configuration files");
+        }
+        if (!Common::FS::RemoveDirRecursively(
+                Common::FS::GetYuzuPath(Common::FS::YuzuPath::CacheDir) / "game_list")) {
+            LOG_WARNING(Frontend, "Failed to remove game metadata cache files");
+        }
+
+        // Explicitly save the game directories, since reinitializing config does not explicitly do
+        // so.
+        QVector<UISettings::GameDir> old_game_dirs = std::move(UISettings::values.game_dirs);
+        QVector<u64> old_favorited_ids = std::move(UISettings::values.favorited_ids);
+
+        Settings::values.disabled_addons.clear();
+
+        config = std::make_unique<Config>();
+        UISettings::values.reset_to_defaults = false;
+
+        UISettings::values.game_dirs = std::move(old_game_dirs);
+        UISettings::values.favorited_ids = std::move(old_favorited_ids);
+
+        InitializeRecentFileMenuActions();
+
+        SetDefaultUIGeometry();
+        RestoreUIState();
+
+        ShowTelemetryCallout();
     }
+    controller_dialog->refreshConfiguration();
     InitializeHotkeys();
+
     if (UISettings::values.theme != old_theme) {
         UpdateUITheme();
     }
