@@ -103,7 +103,6 @@ public:
     }
 
     void closeEvent(QCloseEvent* event) override {
-        this->hide();
         debugWindow->OnThumbnailFrameHide();
     }
 

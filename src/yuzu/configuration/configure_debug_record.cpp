@@ -51,6 +51,7 @@ ConfigureDebugRecord::ConfigureDebugRecord(QWidget* parent)
     ui->list_record_draws->setUniformRowHeights(true);
 
     thumbnail_frame = new ThumbnailWindow(this);
+    thumbnail_frame->setVisible(false);
 
     draw_vertical_header = new QHeaderView(Qt::Orientation::Vertical, this);
     draw_vertical_header->setVisible(false);
@@ -58,7 +59,7 @@ ConfigureDebugRecord::ConfigureDebugRecord(QWidget* parent)
     draw_vertical_header->setDefaultSectionSize(20);
     draw_vertical_header->setMinimumSectionSize(20);
     draw_horizontal_header = new QHeaderView(Qt::Orientation::Horizontal, this);
-    draw_horizontal_header->setVisible(true);
+    draw_horizontal_header->setVisible(false);
     draw_horizontal_header->setStretchLastSection(false);
     draw_horizontal_header->setDefaultAlignment(Qt::AlignLeft);
     draw_horizontal_header->setSectionResizeMode(QHeaderView::ResizeMode::Fixed);
@@ -69,7 +70,7 @@ ConfigureDebugRecord::ConfigureDebugRecord(QWidget* parent)
     pre_vertical_header->setDefaultSectionSize(20);
     pre_vertical_header->setMinimumSectionSize(20);
     pre_horizontal_header = new QHeaderView(Qt::Orientation::Horizontal, this);
-    pre_horizontal_header->setVisible(true);
+    pre_horizontal_header->setVisible(false);
     pre_horizontal_header->setStretchLastSection(false);
     pre_horizontal_header->setDefaultAlignment(Qt::AlignLeft);
     pre_horizontal_header->setSectionResizeMode(QHeaderView::ResizeMode::Fixed);
@@ -85,7 +86,9 @@ ConfigureDebugRecord::ConfigureDebugRecord(QWidget* parent)
             (!Settings::values.pending_frame_record && !system.GPU().CURRENTLY_RECORDING)) {
             resultsTimer->stop();
             BuildResults();
-            ui->btnShowThumbnails->setEnabled(true);
+            if (Settings::values.renderer_backend.GetValue() == Settings::RendererBackend::OpenGL) {
+                ui->btnShowThumbnails->setEnabled(true);
+            }
         }
     });
 
@@ -129,12 +132,18 @@ ConfigureDebugRecord::ConfigureDebugRecord(QWidget* parent)
 ConfigureDebugRecord::~ConfigureDebugRecord() = default;
 
 void ConfigureDebugRecord::HideUnkStateChanged(s32 state) {
+    if (!system.IsPoweredOn() || (static_cast<s32>(draw_models.size()) <= current_frame)) {
+        return;
+    }
     HideAllRows();
     ShowRows();
     UpdateViews();
 }
 
 void ConfigureDebugRecord::PauseClicked(s32 state) {
+    if (!system.IsPoweredOn()) {
+        return;
+    }
     ui->btn_Pause->setEnabled(false);
     ui->btn_Pause->setVisible(false);
     ui->btn_StepFrame->setEnabled(true);
@@ -144,6 +153,9 @@ void ConfigureDebugRecord::PauseClicked(s32 state) {
 }
 
 void ConfigureDebugRecord::RunClicked(s32 state) {
+    if (!system.IsPoweredOn()) {
+        return;
+    }
     ui->btn_Run->setEnabled(false);
     ui->btn_Pause->setEnabled(true);
     ui->btn_Pause->setVisible(true);
@@ -258,6 +270,9 @@ std::array<QStringList, static_cast<s32>(Columns::COUNT)> ConfigureDebugRecord::
 }
 
 void ConfigureDebugRecord::OnFilterChanged(const QString& new_text) {
+    if (!system.IsPoweredOn() || (static_cast<s32>(draw_models.size()) <= current_frame)) {
+        return;
+    }
     HideAllRows();
     ShowRows();
     UpdateViews();
