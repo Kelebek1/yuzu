@@ -150,19 +150,6 @@ void RendererVulkan::SwapBuffers(const Tegra::FramebufferConfig* framebuffer) {
             gpu.RECORD_FRAMES++;
             gpu.METHODS_CALLED.clear();
 
-            u16 res_scale = static_cast<u16>(
-                Settings::values.resolution_factor.GetValue() != 0
-                    ? Settings::values.resolution_factor.GetValue()
-                    : gpu.Renderer().GetRenderWindow().GetFramebufferLayout().GetScalingRatio());
-            const Layout::FramebufferLayout layout{
-                Layout::FrameLayoutFromResolutionScale(res_scale)};
-            u8* data = new u8[layout.height * layout.width * 4];
-            Tegra::GPU::RecordThumbnail thumbnail{data, layout.width, layout.height};
-            renderer_settings.screenshot_bits = thumbnail.data;
-            renderer_settings.screenshot_framebuffer_layout = layout;
-            renderer_settings.screenshot_requested = true;
-            gpu.RECORD_THUMBNAILS.push_back(thumbnail);
-
             if (gpu.RECORD_FRAMES == Settings::values.record_num_frames) {
                 gpu.CURRENTLY_RECORDING = false;
             }
@@ -177,9 +164,6 @@ void RendererVulkan::SwapBuffers(const Tegra::FramebufferConfig* framebuffer) {
             gpu.RECORD_RESULTS_UNCHANGED.resize(Settings::values.record_num_frames);
             Tegra::Record::ResetAndSaveRegs(&gpu);
 
-            for (auto thumbnail : gpu.RECORD_THUMBNAILS) {
-                delete[] thumbnail.data;
-            }
             gpu.RECORD_THUMBNAILS.clear();
 
             gpu.CURRENTLY_RECORDING = true;

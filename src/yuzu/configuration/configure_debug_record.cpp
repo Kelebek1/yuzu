@@ -459,6 +459,9 @@ void ConfigureDebugRecord::ClearResults() {
     results_changed.clear();
     results_unchanged.clear();
     results_frames.clear();
+    for (auto thumbnail : results_thumbnails) {
+        delete[] thumbnail.data;
+    }
     results_thumbnails.clear();
 }
 

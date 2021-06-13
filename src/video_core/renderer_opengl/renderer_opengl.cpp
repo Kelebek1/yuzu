@@ -178,7 +178,7 @@ void RendererOpenGL::SwapBuffers(const Tegra::FramebufferConfig* framebuffer) {
             const Layout::FramebufferLayout layout{
                 Layout::FrameLayoutFromResolutionScale(res_scale)};
             u8* data = new u8[layout.height * layout.width * 4];
-            Tegra::GPU::RecordThumbnail thumbnail{data, layout.width, layout.height};
+            Tegra::GPU::RecordThumbnail thumbnail{data, static_cast<s32>(layout.width), static_cast<s32>(layout.height)};
             renderer_settings.screenshot_bits = thumbnail.data;
             renderer_settings.screenshot_framebuffer_layout = layout;
             renderer_settings.screenshot_requested = true;
@@ -198,9 +198,6 @@ void RendererOpenGL::SwapBuffers(const Tegra::FramebufferConfig* framebuffer) {
             gpu.RECORD_RESULTS_UNCHANGED.resize(Settings::values.record_num_frames);
             Tegra::Record::ResetAndSaveRegs(&gpu);
 
-            for (auto thumbnail : gpu.RECORD_THUMBNAILS) {
-                delete[] thumbnail.data;
-            }
             gpu.RECORD_THUMBNAILS.clear();
 
             gpu.CURRENTLY_RECORDING = true;
