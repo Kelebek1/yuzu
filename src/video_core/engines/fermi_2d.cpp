@@ -24,7 +24,6 @@ void Fermi2D::BindRasterizer(VideoCore::RasterizerInterface* rasterizer_) {
     rasterizer = rasterizer_;
 }
 
-#pragma optimize("", off)
 void Fermi2D::CallMethod(u32 method, u32 method_argument, bool is_last_call) {
     ASSERT_MSG(method < Regs::NUM_REGS,
                "Invalid Fermi2D register, increase the size of the Regs structure");
@@ -44,7 +43,6 @@ void Fermi2D::CallMethod(u32 method, u32 method_argument, bool is_last_call) {
         Blit();
     }
 }
-#pragma optimize("", on)
 
 void Fermi2D::CallMultiMethod(u32 method, const u32* base_start, u32 amount, u32 methods_pending) {
     for (u32 i = 0; i < amount; ++i) {

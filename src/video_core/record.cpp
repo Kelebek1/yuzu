@@ -11,7 +11,6 @@ class CommandBuffer;
 }
 
 namespace Tegra {
-#pragma optimize("", off)
 using Fermi = Tegra::Engines::Fermi2D;
 using Maxwell = Tegra::Engines::Maxwell3D;
 using KeplerCompute = Tegra::Engines::KeplerCompute;
@@ -27,7 +26,7 @@ void Record::OutputMarker(Tegra::GPU* gpu, Vulkan::VKScheduler* scheduler) {
     switch (renderer) {
     case Settings::RendererBackend::OpenGL: {
         glDebugMessageInsert(GL_DEBUG_SOURCE_APPLICATION, GL_DEBUG_TYPE_MARKER,
-                             static_cast<GLuint>(gpu->RECORD_DRAW), GL_DEBUG_SEVERITY_NOTIFICATION,
+                             static_cast<GLuint>(draw), GL_DEBUG_SEVERITY_NOTIFICATION,
                              static_cast<GLsizei>(msg.size()), msg.c_str());
         break;
     }
@@ -46,27 +45,26 @@ std::optional<std::tuple<REG_LIST::const_iterator, size_t, size_t>> FindMethod(
     GPU::RecordEntry& entry);
 
 void Record::BuildResults(Tegra::GPU* gpu, size_t frame) {
-    u32 lastDraw = -1;
-    std::array<std::unordered_set<u32>, 5> encountered_methods;
+    s32 lastDraw = -1;
+    // std::array<std::unordered_set<u32>, 5> encountered_methods;
 
     for (auto& entry : gpu->METHODS_CALLED) {
-        GPU::DrawResult result;
         if (entry.draw != lastDraw) {
-            result.draw = entry.draw;
             lastDraw = entry.draw;
         }
         const auto method = FindMethod(entry);
         if (!method) {
             continue;
         }
-        result.engineName = GetEngineName(entry.engine);
-        encountered_methods[GetEngineIndex(entry.engine)].insert(entry.method);
+        // encountered_methods[GetEngineIndex(entry.engine)].insert(entry.method);
         const auto& [foundMethod, struct_idx, element_idx] = *method;
-        result.method = entry.method;
         const auto methodNames = GetMethodNames(entry, foundMethod, struct_idx, element_idx, false);
-        const auto time = std::chrono::duration_cast<std::chrono::microseconds>(
-            entry.timestamp - gpu->RECORD_TIME_ORIGIN);
-        result.time = time;
+        GPU::DrawResult result{entry.method,
+                               std::string{GetEngineName(entry.engine)},
+                               {},
+                               std::chrono::duration_cast<std::chrono::microseconds>(
+                                   entry.timestamp - gpu->RECORD_TIME_ORIGIN),
+                               entry.draw};
 
         size_t i = 0;
         for (const auto& name : methodNames) {
@@ -77,27 +75,26 @@ void Record::BuildResults(Tegra::GPU* gpu, size_t frame) {
         gpu->RECORD_RESULTS_CHANGED[gpu->RECORD_FRAMES].emplace_back(std::move(result));
     }
 
-    std::vector<std::string> unchanged_state;
     for (auto& engine : gpu->RECORD_OLD_REGS) {
-        for (auto& [_, entry] : engine) {
-            if (encountered_methods[GetEngineIndex(entry.engine)].contains(entry.method)) {
-                continue;
-            }
+        for (auto& entry : engine) {
+            // if (encountered_methods[GetEngineIndex(entry.engine)].contains(entry.method)) {
+            //    continue;
+            //}
             auto found = FindMethod(entry);
             if (!found) {
                 continue;
             }
             const auto& [foundMethod, struct_idx, element_idx] = *found;
             auto methodNames = GetMethodNames(entry, foundMethod, struct_idx, element_idx, true);
-            if (methodNames.size() == 0) {
-                continue;
-            }
+            // if (methodNames.size() == 0) {
+            //    continue;
+            //}
 
-            GPU::DrawResult result;
-            result.method = entry.method;
-            result.engineName = GetEngineName(entry.engine);
-            result.draw = -1;
-            result.time = std::chrono::microseconds(0);
+            GPU::DrawResult result{entry.method,
+                                   std::string{GetEngineName(entry.engine)},
+                                   {},
+                                   std::chrono::microseconds(0),
+                                   0U};
             size_t i = 0;
             for (const auto& name : methodNames) {
                 const auto arg = GetArgumentInfo(entry, foundMethod, i);
@@ -2912,7 +2909,7 @@ std::vector<std::string> Record::GetMethodNames(GPU::RecordEntry& entry,
 }
 
 void Record::ResetAndSaveRegs(Tegra::GPU* gpu) {
-    for (auto& engine : gpu->RECORD_OLD_REGS) {
+     for (auto& engine : gpu->RECORD_OLD_REGS) {
         engine.clear();
     }
 
@@ -2928,9 +2925,8 @@ void Record::ResetAndSaveRegs(Tegra::GPU* gpu) {
             const auto& fermi = gpu->Fermi2D();
             engine.reserve(fermi.regs.reg_array.size());
             for (u32 j = 0; j < fermi.regs.reg_array.size(); ++j) {
-                Tegra::GPU::RecordEntry new_entry{EngineID::FERMI_TWOD_A, j,
-                                                  fermi.regs.reg_array[j], fakeTime, 0};
-                engine.insert({new_entry.method, new_entry});
+                engine.emplace_back(EngineID::FERMI_TWOD_A, j, fermi.regs.reg_array[j], fakeTime,
+                                    0);
             }
             break;
         }
@@ -2938,9 +2934,7 @@ void Record::ResetAndSaveRegs(Tegra::GPU* gpu) {
             const auto& maxwell = gpu->Maxwell3D();
             engine.reserve(maxwell.regs.reg_array.size());
             for (u32 j = 0; j < maxwell.regs.reg_array.size(); ++j) {
-                Tegra::GPU::RecordEntry new_entry{EngineID::MAXWELL_B, j, maxwell.regs.reg_array[j],
-                                                  fakeTime, 0};
-                engine.insert({new_entry.method, new_entry});
+                engine.emplace_back(EngineID::MAXWELL_B, j, maxwell.regs.reg_array[j], fakeTime, 0);
             }
             break;
         }
@@ -2948,9 +2942,8 @@ void Record::ResetAndSaveRegs(Tegra::GPU* gpu) {
             const auto& kepler_compute = gpu->KeplerCompute();
             engine.reserve(kepler_compute.regs.reg_array.size());
             for (u32 j = 0; j < kepler_compute.regs.reg_array.size(); ++j) {
-                Tegra::GPU::RecordEntry new_entry{EngineID::KEPLER_COMPUTE_B, j,
-                                                  kepler_compute.regs.reg_array[j], fakeTime, 0};
-                engine.insert({new_entry.method, new_entry});
+                engine.emplace_back(EngineID::KEPLER_COMPUTE_B, j, kepler_compute.regs.reg_array[j],
+                                    fakeTime, 0);
             }
             break;
         }
@@ -2958,9 +2951,8 @@ void Record::ResetAndSaveRegs(Tegra::GPU* gpu) {
             const auto& kepler_memory = gpu->KeplerMemory();
             engine.reserve(kepler_memory.regs.reg_array.size());
             for (u32 j = 0; j < kepler_memory.regs.reg_array.size(); ++j) {
-                Tegra::GPU::RecordEntry new_entry{EngineID::KEPLER_INLINE_TO_MEMORY_B, j,
-                                                  kepler_memory.regs.reg_array[j], fakeTime, 0};
-                engine.insert({new_entry.method, new_entry});
+                engine.emplace_back(EngineID::KEPLER_INLINE_TO_MEMORY_B, j,
+                                    kepler_memory.regs.reg_array[j], fakeTime, 0);
             }
             break;
         }
@@ -2968,9 +2960,8 @@ void Record::ResetAndSaveRegs(Tegra::GPU* gpu) {
             const auto& maxwell_dma = gpu->MaxwellDMA();
             engine.reserve(maxwell_dma.regs.reg_array.size());
             for (u32 j = 0; j < maxwell_dma.regs.reg_array.size(); ++j) {
-                Tegra::GPU::RecordEntry new_entry{EngineID::MAXWELL_DMA_COPY_A, j,
-                                                  maxwell_dma.regs.reg_array[j], fakeTime, 0};
-                engine.insert({new_entry.method, new_entry});
+                engine.emplace_back(EngineID::MAXWELL_DMA_COPY_A, j, maxwell_dma.regs.reg_array[j],
+                                    fakeTime, 0);
             }
             break;
         }
@@ -3008,4 +2999,3 @@ void Record::CaptureFrames(u32 num) {
 }
 
 } // namespace Tegra
-#pragma optimize("", on)

@@ -377,7 +377,7 @@ public:
     std::atomic<bool> CURRENTLY_RECORDING = false;
     u32 RECORD_FRAMES = 0;
     u32 RECORD_DRAW = 0;
-    std::array<std::unordered_map<u32, RecordEntry>, 5> RECORD_OLD_REGS;
+    std::array<std::vector<RecordEntry>, 5> RECORD_OLD_REGS;
     std::chrono::time_point<std::chrono::high_resolution_clock> RECORD_TIME_ORIGIN;
     std::vector<RecordEntry> METHODS_CALLED;
     std::vector<u32> RECORDED_FRAMES;
@@ -388,6 +388,13 @@ public:
     /// Draw state unmodified by this frame, contains each method, and each argument for each method
     /// (unions have each member)
     std::vector<std::vector<DrawResult>> RECORD_RESULTS_UNCHANGED;
+    struct RecordThumbnail {
+        u8* data;
+        s32 width;
+        s32 height;
+    };
+    std::vector<RecordThumbnail> RECORD_THUMBNAILS;
+
 
 protected:
     void TriggerCpuInterrupt(u32 syncpoint_id, u32 value) const;

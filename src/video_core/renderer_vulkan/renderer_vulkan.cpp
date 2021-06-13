@@ -131,6 +131,72 @@ void RendererVulkan::SwapBuffers(const Tegra::FramebufferConfig* framebuffer) {
     if (!framebuffer) {
         return;
     }
+
+    if constexpr (Tegra::Record::DO_RECORD) {
+        if (Settings::values.record_is_frame_stepping &&
+            Settings::values.record_has_frame_stepped) {
+            Settings::values.record_is_frame_stepping = false;
+            Settings::values.record_has_frame_stepped = false;
+            auto& system = Core::System::GetInstance();
+            const auto _ = system.Pause();
+        }
+        if (gpu.CURRENTLY_RECORDING && gpu.METHODS_CALLED.size() > 0) {
+            LOG_INFO(HW_Memory, "Recorded frame {}, real frame was {}", gpu.RECORD_FRAMES,
+                     m_current_frame);
+            std::scoped_lock lock{gpu.record_mutex};
+            Tegra::Record::BuildResults(&gpu, m_current_frame);
+            Tegra::Record::ResetAndSaveRegs(&gpu);
+            gpu.RECORDED_FRAMES.push_back(m_current_frame);
+            gpu.RECORD_FRAMES++;
+            gpu.METHODS_CALLED.clear();
+
+            u16 res_scale = static_cast<u16>(
+                Settings::values.resolution_factor.GetValue() != 0
+                    ? Settings::values.resolution_factor.GetValue()
+                    : gpu.Renderer().GetRenderWindow().GetFramebufferLayout().GetScalingRatio());
+            const Layout::FramebufferLayout layout{
+                Layout::FrameLayoutFromResolutionScale(res_scale)};
+            u8* data = new u8[layout.height * layout.width * 4];
+            Tegra::GPU::RecordThumbnail thumbnail{data, layout.width, layout.height};
+            renderer_settings.screenshot_bits = thumbnail.data;
+            renderer_settings.screenshot_framebuffer_layout = layout;
+            renderer_settings.screenshot_requested = true;
+            gpu.RECORD_THUMBNAILS.push_back(thumbnail);
+
+            if (gpu.RECORD_FRAMES == Settings::values.record_num_frames) {
+                gpu.CURRENTLY_RECORDING = false;
+            }
+        } else if (gpu.CURRENTLY_RECORDING &&
+                   gpu.RECORD_FRAMES >= Settings::values.record_num_frames) {
+            gpu.CURRENTLY_RECORDING = false;
+        } else if (Settings::values.pending_frame_record) {
+            gpu.RECORDED_FRAMES.clear();
+            gpu.RECORD_RESULTS_CHANGED.clear();
+            gpu.RECORD_RESULTS_UNCHANGED.clear();
+            gpu.RECORD_RESULTS_CHANGED.resize(Settings::values.record_num_frames);
+            gpu.RECORD_RESULTS_UNCHANGED.resize(Settings::values.record_num_frames);
+            Tegra::Record::ResetAndSaveRegs(&gpu);
+
+            for (auto thumbnail : gpu.RECORD_THUMBNAILS) {
+                delete[] thumbnail.data;
+            }
+            gpu.RECORD_THUMBNAILS.clear();
+
+            gpu.CURRENTLY_RECORDING = true;
+            Settings::values.pending_frame_record = false;
+            gpu.RECORD_FRAMES = 0;
+            Tegra::Record::CaptureFrames(Settings::values.record_num_frames);
+        }
+
+        if (Settings::values.record_is_frame_stepping &&
+            !Settings::values.record_has_frame_stepped) {
+            Settings::values.record_has_frame_stepped = true;
+        }
+
+        gpu.RECORD_DRAW = 0;
+        gpu.RECORD_TIME_ORIGIN = std::chrono::high_resolution_clock::now();
+    }
+
     const auto& layout = render_window.GetFramebufferLayout();
     if (layout.width > 0 && layout.height > 0 && render_window.IsShown()) {
         const VAddr framebuffer_addr = framebuffer->address + framebuffer->offset;
@@ -161,53 +227,6 @@ void RendererVulkan::SwapBuffers(const Tegra::FramebufferConfig* framebuffer) {
 
     ++m_current_frame;
     render_window.OnFrameDisplayed();
-
-    if constexpr (Tegra::Record::DO_RECORD) {
-        if (Settings::values.record_is_frame_stepping &&
-            Settings::values.record_has_frame_stepped) {
-            Settings::values.record_is_frame_stepping = false;
-            Settings::values.record_has_frame_stepped = false;
-            auto& system = Core::System::GetInstance();
-            const auto _ = system.Pause();
-        }
-        if (gpu.CURRENTLY_RECORDING && gpu.METHODS_CALLED.size() > 0) {
-            LOG_INFO(HW_Memory, "Recorded frame {}, real frame was {}", gpu.RECORD_FRAMES,
-                     m_current_frame);
-            std::scoped_lock lock{gpu.record_mutex};
-            Tegra::Record::BuildResults(&gpu, m_current_frame);
-            gpu.RECORDED_FRAMES.push_back(m_current_frame);
-            gpu.RECORD_FRAMES++;
-            gpu.METHODS_CALLED.clear();
-            Tegra::Record::ResetAndSaveRegs(&gpu);
-
-            if (gpu.RECORD_FRAMES == Settings::values.record_num_frames) {
-                gpu.CURRENTLY_RECORDING = false;
-            }
-        } else if (gpu.CURRENTLY_RECORDING &&
-                   gpu.RECORD_FRAMES >= Settings::values.record_num_frames) {
-            gpu.CURRENTLY_RECORDING = false;
-        } else if (Settings::values.pending_frame_record) {
-            gpu.RECORDED_FRAMES.clear();
-            gpu.RECORD_RESULTS_CHANGED.clear();
-            gpu.RECORD_RESULTS_UNCHANGED.clear();
-            gpu.RECORD_RESULTS_CHANGED.resize(Settings::values.record_num_frames);
-            gpu.RECORD_RESULTS_UNCHANGED.resize(Settings::values.record_num_frames);
-            Tegra::Record::ResetAndSaveRegs(&gpu);
-
-            gpu.CURRENTLY_RECORDING = true;
-            Settings::values.pending_frame_record = false;
-            gpu.RECORD_FRAMES = 0;
-            Tegra::Record::CaptureFrames(Settings::values.record_num_frames);
-        }
-
-        if (Settings::values.record_is_frame_stepping &&
-            !Settings::values.record_has_frame_stepped) {
-            Settings::values.record_has_frame_stepped = true;
-        }
-
-        gpu.RECORD_DRAW = 0;
-        gpu.RECORD_TIME_ORIGIN = std::chrono::high_resolution_clock::now();
-    }
 }
 
 void RendererVulkan::Report() const {

@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1340</width>
-    <height>752</height>
+    <width>1342</width>
+    <height>740</height>
    </rect>
   </property>
   <property name="focusPolicy">
@@ -57,7 +57,7 @@
     </font>
    </property>
    <property name="text">
-    <string>Draws</string>
+    <string>Frames</string>
    </property>
    <property name="alignment">
     <set>Qt::AlignCenter</set>
@@ -78,7 +78,7 @@
     </font>
    </property>
    <property name="text">
-    <string>Changed State</string>
+    <string>New State This Draw</string>
    </property>
    <property name="alignment">
     <set>Qt::AlignCenter</set>
@@ -99,7 +99,7 @@
     </font>
    </property>
    <property name="text">
-    <string>Unchanged State</string>
+    <string>State This Draw</string>
    </property>
    <property name="alignment">
     <set>Qt::AlignCenter</set>
@@ -306,8 +306,8 @@
   <widget class="QCheckBox" name="checkBox_hide_unk">
    <property name="geometry">
     <rect>
-     <x>290</x>
-     <y>690</y>
+     <x>370</x>
+     <y>700</y>
      <width>121</width>
      <height>17</height>
     </rect>
@@ -452,6 +452,50 @@
    <attribute name="headerStretchLastSection">
     <bool>true</bool>
    </attribute>
+  </widget>
+  <widget class="QPushButton" name="btnShowThumbnails">
+   <property name="geometry">
+    <rect>
+     <x>170</x>
+     <y>690</y>
+     <width>151</width>
+     <height>41</height>
+    </rect>
+   </property>
+   <property name="sizePolicy">
+    <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+     <horstretch>0</horstretch>
+     <verstretch>0</verstretch>
+    </sizepolicy>
+   </property>
+   <property name="focusPolicy">
+    <enum>Qt::NoFocus</enum>
+   </property>
+   <property name="text">
+    <string>Show Screenshots</string>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="btnHideThumbnails">
+   <property name="geometry">
+    <rect>
+     <x>170</x>
+     <y>690</y>
+     <width>151</width>
+     <height>41</height>
+    </rect>
+   </property>
+   <property name="sizePolicy">
+    <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+     <horstretch>0</horstretch>
+     <verstretch>0</verstretch>
+    </sizepolicy>
+   </property>
+   <property name="focusPolicy">
+    <enum>Qt::NoFocus</enum>
+   </property>
+   <property name="text">
+    <string>Hide Screenshots</string>
+   </property>
   </widget>
  </widget>
  <resources/>

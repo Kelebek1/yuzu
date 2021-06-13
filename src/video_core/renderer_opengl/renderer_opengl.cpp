@@ -153,20 +153,6 @@ void RendererOpenGL::SwapBuffers(const Tegra::FramebufferConfig* framebuffer) {
         return;
     }
 
-    PrepareRendertarget(framebuffer);
-    RenderScreenshot();
-
-    state_tracker.BindFramebuffer(0);
-    DrawScreen(emu_window.GetFramebufferLayout());
-
-    ++m_current_frame;
-
-    gpu.RendererFrameEndNotify();
-    rasterizer.TickFrame();
-
-    context->SwapBuffers();
-    render_window.OnFrameDisplayed();
-
     if constexpr (Tegra::Record::DO_RECORD) {
         if (Settings::values.record_is_frame_stepping &&
             Settings::values.record_has_frame_stepped) {
@@ -180,10 +166,23 @@ void RendererOpenGL::SwapBuffers(const Tegra::FramebufferConfig* framebuffer) {
                      m_current_frame);
             std::scoped_lock lock{gpu.record_mutex};
             Tegra::Record::BuildResults(&gpu, m_current_frame);
+            Tegra::Record::ResetAndSaveRegs(&gpu);
             gpu.RECORDED_FRAMES.push_back(m_current_frame);
             gpu.RECORD_FRAMES++;
             gpu.METHODS_CALLED.clear();
-            Tegra::Record::ResetAndSaveRegs(&gpu);
+
+            u16 res_scale = static_cast<u16>(
+                Settings::values.resolution_factor.GetValue() != 0
+                    ? Settings::values.resolution_factor.GetValue()
+                    : gpu.Renderer().GetRenderWindow().GetFramebufferLayout().GetScalingRatio());
+            const Layout::FramebufferLayout layout{
+                Layout::FrameLayoutFromResolutionScale(res_scale)};
+            u8* data = new u8[layout.height * layout.width * 4];
+            Tegra::GPU::RecordThumbnail thumbnail{data, layout.width, layout.height};
+            renderer_settings.screenshot_bits = thumbnail.data;
+            renderer_settings.screenshot_framebuffer_layout = layout;
+            renderer_settings.screenshot_requested = true;
+            gpu.RECORD_THUMBNAILS.push_back(thumbnail);
 
             if (gpu.RECORD_FRAMES == Settings::values.record_num_frames) {
                 gpu.CURRENTLY_RECORDING = false;
@@ -199,6 +198,11 @@ void RendererOpenGL::SwapBuffers(const Tegra::FramebufferConfig* framebuffer) {
             gpu.RECORD_RESULTS_UNCHANGED.resize(Settings::values.record_num_frames);
             Tegra::Record::ResetAndSaveRegs(&gpu);
 
+            for (auto thumbnail : gpu.RECORD_THUMBNAILS) {
+                delete[] thumbnail.data;
+            }
+            gpu.RECORD_THUMBNAILS.clear();
+
             gpu.CURRENTLY_RECORDING = true;
             Settings::values.pending_frame_record = false;
             gpu.RECORD_FRAMES = 0;
@@ -213,6 +217,20 @@ void RendererOpenGL::SwapBuffers(const Tegra::FramebufferConfig* framebuffer) {
         gpu.RECORD_DRAW = 0;
         gpu.RECORD_TIME_ORIGIN = std::chrono::high_resolution_clock::now();
     }
+
+    PrepareRendertarget(framebuffer);
+    RenderScreenshot();
+
+    state_tracker.BindFramebuffer(0);
+    DrawScreen(emu_window.GetFramebufferLayout());
+
+    ++m_current_frame;
+
+    gpu.RendererFrameEndNotify();
+    rasterizer.TickFrame();
+
+    context->SwapBuffers();
+    render_window.OnFrameDisplayed();
 }
 
 void RendererOpenGL::PrepareRendertarget(const Tegra::FramebufferConfig* framebuffer) {
@@ -547,7 +565,9 @@ void RendererOpenGL::RenderScreenshot() {
     glBindFramebuffer(GL_READ_FRAMEBUFFER, old_read_fb);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, old_draw_fb);
 
-    renderer_settings.screenshot_complete_callback();
+    if (renderer_settings.screenshot_complete_callback) {
+        renderer_settings.screenshot_complete_callback();
+    }
     renderer_settings.screenshot_requested = false;
 }
 
